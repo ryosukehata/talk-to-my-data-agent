@@ -1,0 +1,19 @@
+@import url("https://fonts.googleapis.com/css2?family=Roboto");
+
+html,
+body,
+[class*="css"] {
+  font-family: "Roboto", sans-serif;
+}
+
+.main {
+  padding: 0rem 1rem;
+}
+
+.stProgress > div > div > div > div {
+  background-color: #1c83e1;
+}
+
+.stDownloadButton button {
+  width: 100%;
+}
