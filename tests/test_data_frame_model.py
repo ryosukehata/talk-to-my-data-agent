@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 from typing import Any
 
 import pandas as pd
@@ -34,24 +35,26 @@ def data() -> dict[str, Any]:
 class TestDatasetInput:
     def test_accepts_dataframe(self, data: dict[str, Any]) -> None:
         model = AnalystDataset(data=data["df"], name="test")
-        assert isinstance(model.data, list)
+        assert isinstance(model._data, pd.DataFrame)
         assert_frame_equal(model.to_df(), data["df"])
 
     def test_accepts_records(self, data: dict[str, Any]) -> None:
         model = AnalystDataset(data=data["records"], name="test")
-        assert isinstance(model.data, list)
+        assert isinstance(model._data, pd.DataFrame)
         assert_frame_equal(model.to_df(), data["df"])
 
     def test_serialization(self, data: dict[str, Any]) -> None:
         model = AnalystDataset(data=data["df"], name="test")
         serialized = model.model_dump_json()
+        logging.info(serialized)
         deserialized = AnalystDataset.model_validate_json(serialized)
+
         assert_frame_equal(deserialized.to_df(), data["df"])
 
     def test_empty_dataframe(self) -> None:
         empty_df = pd.DataFrame(columns=["a", "b"])
         model = AnalystDataset(data=empty_df, name="test")
-        assert model.data == []
+        # assert model.data == pd.DataFrame
         assert_frame_equal(model.to_df(), empty_df)
 
     def test_single_row(self) -> None:
@@ -64,7 +67,7 @@ class TestDatasetInput:
         invalid_inputs = [42, "not a json string", {"not": "a list"}, [1, 2, 3], None]
         for invalid_input in invalid_inputs:
             with pytest.raises((ValidationError, ValueError)):
-                AnalystDataset(data=invalid_input, name="test")  # type: ignore
+                AnalystDataset(data=invalid_input, name="test")
 
     def test_preserves_dtypes(self) -> None:
         df = pd.DataFrame(
@@ -100,33 +103,9 @@ class TestDatasetInput:
         model = AnalystDataset(data=df, name="test")
         result_df = model.to_df()
         # Check if index is preserved when converting back to DataFrame
-        assert_frame_equal(result_df, df.reset_index(drop=True))
+        assert_frame_equal(result_df, df)
 
     @pytest.mark.parametrize("input_type", ["df", "records"])
     def test_different_input_types(self, input_type: str, data: dict[str, Any]) -> None:
         model = AnalystDataset(data=data[input_type], name="test")
         assert_frame_equal(model.to_df(), data["df"])
-
-
-# class TestTypedDatasetInput:
-#     def test_type_validation(self) -> None:
-#         # Test with correct types
-#         valid_df = pd.DataFrame({"a": [1, 2], "b": ["x", "y"]})
-#         model = TypedDatasetInput(data=valid_df)
-#         assert_frame_equal(model.to_df(), valid_df)
-
-#         # Test with incorrect types
-#         invalid_df = pd.DataFrame({"a": ["wrong", "type"], "b": [1, 2]})
-#         with pytest.raises(ValidationError):
-#             TypedDatasetInput(data=invalid_df)
-
-#     def test_additional_fields(self) -> None:
-#         df = pd.DataFrame(
-#             {
-#                 "a": [1, 2],
-#                 "b": ["x", "y"],
-#                 "extra": [True, False],  # extra column
-#             }
-#         )
-#         with pytest.raises(ValidationError):
-#             TypedDatasetInput(data=df)

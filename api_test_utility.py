@@ -33,7 +33,7 @@ from rich.table import Table
 from utils.rest_api import (  # type: ignore[attr-defined]
     cleanse_dataframes,
     get_business_analysis,
-    get_dictionary,
+    get_dictionaries,
     rephrase_message,
     run_analysis,
     run_charts,
@@ -271,7 +271,7 @@ async def main() -> None:
                     f"[cyan]Debug: Request dataset '{dataset.name}' has {len(dataset.data)} records[/cyan]"
                 )
 
-            dictionary_result = await get_dictionary(datasets)
+            dictionary_result = await get_dictionaries(datasets)
             progress.update(task, completed=True)
 
         dict_elapsed_time = time.time() - dict_start_time
@@ -466,12 +466,11 @@ async def main() -> None:
 
         chat_request = ChatRequest(messages=chat_messages)
         chat_result = await rephrase_message(chat_request)
-
         # Add new question to history
         result["question_history"].append(
             {
                 "original": selected_question,
-                "enhanced": chat_result.get("enhanced_user_message", selected_question),
+                "enhanced": chat_result or selected_question,
                 "timestamp": datetime.now().isoformat(),
             }
         )
@@ -485,7 +484,7 @@ async def main() -> None:
         current_table.add_column("Enhanced Question", style="yellow")
         current_table.add_row(
             selected_question,
-            chat_result.get("enhanced_user_message", selected_question),
+            chat_result or selected_question,
         )
         console.print(current_table)
 
@@ -506,11 +505,11 @@ async def main() -> None:
 
                     # Create analysis request with cleaned data
                     analysis_request = RunAnalysisRequest(
-                        data={
+                        datasets={
                             dataset["name"]: dataset["data"]
                             for dataset in result["datasets"]
                         },
-                        dictionary={
+                        dictionaries={
                             dataset["name"]: [
                                 {
                                     "column": col["column"],
@@ -521,9 +520,7 @@ async def main() -> None:
                             ]
                             for dataset in dictionary_result.get("dictionaries", [])
                         },
-                        question=chat_result.get(
-                            "enhanced_user_message", selected_question
-                        ),
+                        question=chat_result or selected_question,
                     )
 
                     try:
@@ -738,7 +735,7 @@ async def main() -> None:
                         analysis_result["data"], list
                     ):
                         business_request = RunBusinessAnalysisRequest(
-                            data=analysis_result["data"],
+                            dataset=analysis_result["data"],
                             dictionary=[
                                 {
                                     "column": col["column"],
@@ -748,9 +745,7 @@ async def main() -> None:
                                 for dataset in dictionary_result.get("dictionaries", [])
                                 for col in dataset.get("dictionary", [])
                             ],
-                            question=chat_result.get(
-                                "enhanced_user_message", selected_question
-                            ),
+                            question=chat_result or selected_question,
                         )
 
                         # Get business analysis
@@ -801,10 +796,8 @@ async def main() -> None:
 
                     # Create charts request
                     charts_request = RunChartsRequest(
-                        data=analysis_data,
-                        question=chat_result.get(
-                            "enhanced_user_message", selected_question
-                        ),
+                        dataset=analysis_data,
+                        question=chat_result or selected_question,
                     )
 
                     # Run charts
@@ -832,7 +825,7 @@ async def main() -> None:
                                 </style>
                             </head>
                             <body>
-                                <h2>{chat_result.get("enhanced_user_message", selected_question)}</h2>
+                                <h2>{chat_result or selected_question}</h2>
                                 <div class="chart-container">
                                     <div id="chart1" style="width: 100%; height: 600px;"></div>
                                 </div>
@@ -945,14 +938,11 @@ async def main() -> None:
 
                 chat_request = ChatRequest(messages=chat_messages)
                 chat_result = await rephrase_message(chat_request)
-
                 # Add new question to history
                 result["question_history"].append(
                     {
                         "original": selected_question,
-                        "enhanced": chat_result.get(
-                            "enhanced_user_message", selected_question
-                        ),
+                        "enhanced": chat_result or selected_question,
                         "timestamp": datetime.now().isoformat(),
                     }
                 )
@@ -966,7 +956,7 @@ async def main() -> None:
                 current_table.add_column("Enhanced Question", style="yellow")
                 current_table.add_row(
                     selected_question,
-                    chat_result.get("enhanced_user_message", selected_question),
+                    chat_result or selected_question,
                 )
                 console.print(current_table)
 

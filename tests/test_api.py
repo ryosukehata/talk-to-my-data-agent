@@ -12,10 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 from typing import Any
 
-import pandas as pd
 import plotly.graph_objects as go
 import pytest
 import pytest_asyncio
@@ -32,21 +30,6 @@ from utils.schema import (
     RunChartsRequest,
     RunChartsResult,
 )
-
-
-@pytest.fixture(scope="module")
-def dataset_loaded(url_diabetes: str) -> AnalystDataset:
-    df = pd.read_csv(url_diabetes)
-    # Replace non-JSON compliant values
-    df = df.replace([float("inf"), -float("inf")], None)  # Replace infinity with None
-    df = df.where(pd.notnull(df), None)  # Replace NaN with None
-
-    # Create dataset dictionary
-    dataset = AnalystDataset(
-        name=os.path.splitext(os.path.basename(url_diabetes))[0],
-        data=df,
-    )
-    return dataset
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -70,10 +53,10 @@ async def data_dictionary(
     pulumi_up: Any, dataset_loaded: AnalystDataset
 ) -> list[DataDictionary]:
     from utils.api import (
-        get_dictionary,
+        get_dictionaries,
     )
 
-    dictionary_result = await get_dictionary([dataset_loaded])
+    dictionary_result = await get_dictionaries([dataset_loaded])
     return dictionary_result
 
 
@@ -90,8 +73,8 @@ def run_analysis_request(
     question: str,
 ) -> RunAnalysisRequest:
     analysis_request = RunAnalysisRequest(
-        data=dataset_cleansed,
-        dictionary=data_dictionary,
+        datasets=[ds.dataset for ds in dataset_cleansed],
+        dictionaries=data_dictionary,
         question=question,
     )
     return analysis_request
@@ -121,7 +104,7 @@ def chart_request(
 ) -> RunChartsRequest:
     # Prepare requests
     chart_request = RunChartsRequest(
-        data=run_analysis_result_canned.data,
+        dataset=run_analysis_result_canned.dataset,
         question=question,
     )
     return chart_request
@@ -131,18 +114,20 @@ def chart_request(
 def business_request(
     pulumi_up: Any, run_analysis_result_canned: RunAnalysisResult, question: str
 ) -> RunBusinessAnalysisRequest:
-    assert run_analysis_result_canned.data is not None
+    assert run_analysis_result_canned.dataset is not None
     business_request = RunBusinessAnalysisRequest(
-        data=run_analysis_result_canned.data,
+        dataset=run_analysis_result_canned.dataset,
         dictionary=DataDictionary(
             name="analysis_result",
-            dictionary=[
+            column_descriptions=[
                 DataDictionaryColumn(
                     column=col,
                     description="Analysis result column",
-                    data_type=str(run_analysis_result_canned.data.to_df()[col].dtype),
+                    data_type=str(
+                        run_analysis_result_canned.dataset.to_df()[col].dtype
+                    ),
                 )
-                for col in run_analysis_result_canned.data.to_df().columns
+                for col in run_analysis_result_canned.dataset.to_df().columns
             ],
         ),
         question=question,
@@ -162,8 +147,8 @@ async def test_run_analysis(
 
     assert run_analysis_result.code is not None
     assert len(run_analysis_result.code) > 1
-    assert run_analysis_result.data is not None
-    df = run_analysis_result.data.to_df()
+    assert run_analysis_result.dataset is not None
+    df = run_analysis_result.dataset.to_df()
     assert df.shape[0] > 0
     assert run_analysis_result.status == "success"
 

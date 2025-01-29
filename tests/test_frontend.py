@@ -18,11 +18,12 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
-import pandas as pd
 import pytest
 from streamlit.testing.v1 import AppTest
+
+from utils.schema import DataDictionary
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -76,11 +77,13 @@ def test_database_queried(app_post_database_load: AppTest) -> None:
 
 
 def test_data_dictionary_generated(app_post_database_load: AppTest) -> None:
-    dictionaries = app_post_database_load.session_state.data_dictionaries
+    dictionaries = cast(
+        list[DataDictionary], app_post_database_load.session_state.data_dictionaries
+    )
     for dictionary in dictionaries:
-        dictionary_as_dataframe = pd.DataFrame(dictionary.model_dump()["dictionary"])
-        logger.info(dictionary_as_dataframe)
-        assert len(dictionary_as_dataframe)
-        assert "No description available" not in list(
-            dictionary_as_dataframe["description"]
-        )
+        column_decriptions = dictionary.column_descriptions
+        logger.info(column_decriptions)
+        assert len(column_decriptions)
+        assert "No description available" not in [
+            c.description for c in column_decriptions
+        ]

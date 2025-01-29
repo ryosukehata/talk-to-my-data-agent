@@ -27,7 +27,7 @@ from utils.api import (
     cleanse_dataframes,
     download_catalog_datasets,
     get_business_analysis,
-    get_dictionary,
+    get_dictionaries,
     list_catalog_datasets,
     rephrase_message,
     run_analysis,
@@ -49,6 +49,7 @@ from utils.schema import (
     RunChartsRequest,
     RunChartsResult,
     RunDatabaseAnalysisRequest,
+    RunDatabaseAnalysisResult,
     ValidatedQuestion,
 )
 
@@ -117,23 +118,20 @@ async def list_catalog_datasets_endpoint(limit: int = 100) -> list[AiCatalogData
 @app.get("/download_catalog_datasets")
 async def download_catalog_datasets_endpoint(
     dataset_ids: list[str],
-) -> dict[str, list[dict[str, Any]]]:
-    return {ds.name: ds.data for ds in download_catalog_datasets(*dataset_ids)}
+) -> list[AnalystDataset]:
+    return download_catalog_datasets(*dataset_ids)
 
 
-@app.get("/get_snowflake_tables")
-async def get_snowflake_tables_endpoint() -> list[str]:
+@app.get("/get_database_tables")
+async def get_database_tables_endpoint() -> list[str]:
     return Database.get_tables()
 
 
-@app.get("/get_snowflake_data")
-async def get_snowflake_data_endpoint(
+@app.get("/get_database_data")
+async def get_database_data_endpoint(
     table_names: list[str], sample_size: int = 5000
-) -> dict[str, list[dict[str, Any]]]:
-    return {
-        ds.name: ds.data
-        for ds in Database.get_data(*table_names, sample_size=sample_size)
-    }
+) -> list[AnalystDataset]:
+    return Database.get_data(*table_names, sample_size=sample_size)
 
 
 @app.post("/cleanse_dataframes")
@@ -144,10 +142,10 @@ async def cleanse_dataframes_endpoint(
 
 
 @app.post("/get_dictionary")
-async def get_dictionary_endpoint(
+async def get_dictionaries_endpoint(
     datasets: list[AnalystDataset],
 ) -> list[DataDictionary]:
-    return await get_dictionary(datasets)
+    return await get_dictionaries(datasets)
 
 
 @app.post("/suggest_questions")
@@ -169,7 +167,7 @@ async def get_business_analysis_endpoint(
     return await get_business_analysis(request)
 
 
-@app.post("/chat")
+@app.post("/rephrase_message")
 async def rephrase_message_endpoint(request: ChatRequest) -> str:
     return await rephrase_message(request)
 
@@ -182,5 +180,5 @@ async def run_analysis_endpoint(request: RunAnalysisRequest) -> RunAnalysisResul
 @app.post("/run_database_analysis")
 async def run_database_analysis_endpoint(
     request: RunDatabaseAnalysisRequest,
-) -> RunAnalysisResult:
+) -> RunDatabaseAnalysisResult:
     return await run_database_analysis(request=request)

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.1.2] - 2025-01-29
+
+### Changed
+- asyncio based frontend
+- general clean-up of the interface
+- pandas based analysis dataset
+- additional tests
+- unified renderer for analysis frontend
+
 ## [0.1.1] - 2025-01-24
 
 ### Added

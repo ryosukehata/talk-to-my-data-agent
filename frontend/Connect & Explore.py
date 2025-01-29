@@ -37,7 +37,7 @@ from app_settings import (
 from utils.api import (
     cleanse_dataframes,
     download_catalog_datasets,
-    get_dictionary,
+    get_dictionaries,
     list_catalog_datasets,
 )
 from utils.database_helpers import Database, app_infra
@@ -45,7 +45,6 @@ from utils.schema import (
     AnalystDataset,
     CleansedDataset,
     CleansingReport,
-    DataDictionary,
 )
 
 warnings.filterwarnings("ignore")
@@ -67,23 +66,6 @@ if "initialized" not in st.session_state:
     st.session_state.data_source = None
     st.session_state.file_uploader_key = 0
     st.session_state.processed_file_ids = []
-
-
-# Modify process_data to handle coroutine reuse
-def process_data_cached(_datasets: list[AnalystDataset]) -> list[CleansedDataset]:
-    """
-    Wrapper function to handle async processing with caching
-    """
-    return asyncio.run(cleanse_dataframes(_datasets))
-
-
-def generate_dictionaries(
-    _cleansed_data: list[CleansedDataset],
-) -> list[DataDictionary]:
-    """
-    Wrapper function to handle async dictionary generation
-    """
-    return asyncio.run(get_dictionary(_cleansed_data))
 
 
 def process_uploaded_file(file: UploadedFile) -> list[AnalystDataset]:
@@ -149,10 +131,9 @@ def clear_data_callback() -> None:
     st.rerun()
 
 
-def process_data_and_update_state(datasets: list[AnalystDataset]) -> None:
+async def process_data_and_update_state(datasets: list[AnalystDataset]) -> None:
     new_dataset_names = [ds.name for ds in datasets]
 
-    # Remove existing datasets with the same name
     st.session_state.datasets = [
         ds for ds in st.session_state.datasets if ds.name not in new_dataset_names
     ]
@@ -161,7 +142,6 @@ def process_data_and_update_state(datasets: list[AnalystDataset]) -> None:
     ]
 
     # Add the new (or updated) datasets to the session state
-    st.session_state.datasets.extend(datasets)
 
     for ds in datasets:
         st.success(f"✓ {ds.name}: {len(ds.to_df())} rows, {len(ds.columns)} columns")
@@ -170,29 +150,25 @@ def process_data_and_update_state(datasets: list[AnalystDataset]) -> None:
     logger.info("Starting data processing")
     if st.session_state.data_source != "database":
         try:
-            cleansed_datasets = process_data_cached(datasets)
+            cleansed_datasets = await cleanse_dataframes(datasets)
         except Exception as e:
             logger.error("Data processing failed")
             st.error(f"❌ Error processing data: {str(e)}")
+            cleansed_datasets = []
+        analysis_datasets = [ds.dataset for ds in cleansed_datasets]
+        st.session_state.cleansed_data += cleansed_datasets
     else:
-        cleansed_datasets = [
-            CleansedDataset(
-                name=ds.name,
-                data=ds.data,
-                cleaning_report=CleansingReport(
-                    columns_cleaned=[], errors=[], warnings=[]
-                ),
-            )
-            for ds in datasets
-        ]
+        analysis_datasets = datasets
 
-    st.session_state.cleansed_data += cleansed_datasets
+    st.session_state.datasets.extend(analysis_datasets)
     logger.info("Data processing successful, generating dictionaries")
 
     new_dictionaries = []
+
     # Generate data dictionaries
     try:
-        new_dictionaries = generate_dictionaries(cleansed_datasets)
+        new_dictionaries = await get_dictionaries(analysis_datasets)
+
         st.session_state.data_dictionaries += [
             d
             for d in new_dictionaries
@@ -205,13 +181,11 @@ def process_data_and_update_state(datasets: list[AnalystDataset]) -> None:
         )
     if len(new_dictionaries) > 0:
         st.success("✅ Data processed and dictionaries generated successfully!")
-        st.info(
-            "View the generated data dictionaries in the [Data Dictionary](/Data_Dictionary) page"
-        )
+        st.info("View the generated data dictionaries in the Data Dictionary page")
 
 
 # Add callback for AI Catalog dataset selection
-def catalog_download_callback() -> None:
+async def catalog_download_callback() -> None:
     """Callback function for AI Catalog dataset download"""
     if (
         "selected_catalog_datasets" in st.session_state
@@ -225,10 +199,10 @@ def catalog_download_callback() -> None:
                 ]
                 dataframes = download_catalog_datasets(*selected_ids)
 
-                process_data_and_update_state(dataframes)
+                await process_data_and_update_state(dataframes)
 
 
-def load_from_database_callback() -> None:
+async def load_from_database_callback() -> None:
     """Callback function for Database table download"""
     # Set flag to indicate data source is a database
     st.session_state.data_source = DataSource.DATABASE
@@ -244,10 +218,10 @@ def load_from_database_callback() -> None:
                     st.error(f"Failed to load data from {app_infra.database}")
                     return
 
-                process_data_and_update_state(dataframes)
+                await process_data_and_update_state(dataframes)
 
 
-def uploaded_file_callback(uploaded_files: list[UploadedFile]) -> None:
+async def uploaded_file_callback(uploaded_files: list[UploadedFile]) -> None:
     """Callback function for file uploads"""
     # Set flag to indicate data source is a file
     st.session_state.data_source = DataSource.FILE
@@ -257,7 +231,7 @@ def uploaded_file_callback(uploaded_files: list[UploadedFile]) -> None:
         for file in uploaded_files:
             if file.file_id not in st.session_state.processed_file_ids:
                 dataset_results = process_uploaded_file(file)
-                process_data_and_update_state(dataset_results)
+                await process_data_and_update_state(dataset_results)
                 st.session_state.processed_file_ids.append(file.file_id)
 
 
@@ -268,167 +242,191 @@ st.set_page_config(page_title="Connect Data", page_icon=PAGE_ICON, layout="wide"
 # Custom CSS
 apply_custom_css()
 
-# Sidebar for data upload and processing
-with st.sidebar:
-    st.title("Connect")
 
-    # Load Files expander containing file upload and AI Catalog
-    with st.expander("Load Files", expanded=True):
-        # File upload section
-        col1, col2, col3 = st.columns([1, 4, 2])
-        with col1:
-            st.image("csv_File_Logo.svg", width=25)
-        with col2:
-            st.write("**Load Data Files**")
-        uploaded_files = st.file_uploader(
-            "Select 1 or multiple files",
-            type=["csv", "xlsx", "xls"],
-            accept_multiple_files=True,
-            disabled=st.session_state.data_source == DataSource.DATABASE,
-            key=st.session_state.file_uploader_key,
-        )
-        if uploaded_files:
-            uploaded_file_callback(uploaded_files)
+async def main() -> None:
+    # Sidebar for data upload and processing
+    with st.sidebar:
+        st.title("Connect")
 
-        # AI Catalog section
-        st.subheader("☁️   DataRobot AI Catalog")
-
-        # Get datasets from catalog
-        with st.spinner("Loading datasets from AI Catalog..."):
-            datasets = [i.model_dump() for i in list_catalog_datasets()]
-
-        # Create form for dataset selection
-        with st.form("catalog_selection_form", border=False):
-            selected_catalog_datasets = st.multiselect(
-                "Select datasets from AI Catalog",
-                options=datasets,
-                format_func=lambda x: f"{x['name']} ({x['size']})",
-                help="You can select multiple datasets",
-                key="selected_catalog_datasets",
+        # Load Files expander containing file upload and AI Catalog
+        with st.expander("Load Files", expanded=True):
+            # File upload section
+            col1, col2, col3 = st.columns([1, 4, 2])
+            with col1:
+                st.image("csv_File_Logo.svg", width=25)
+            with col2:
+                st.write("**Load Data Files**")
+            uploaded_files = st.file_uploader(
+                "Select 1 or multiple files",
+                type=["csv", "xlsx", "xls"],
+                accept_multiple_files=True,
                 disabled=st.session_state.data_source == DataSource.DATABASE,
+                key=st.session_state.file_uploader_key,
             )
+            if uploaded_files:
+                await uploaded_file_callback(uploaded_files)
 
-            # Form submit button
-            submit_button = st.form_submit_button(
-                "Load Datasets",
-                on_click=catalog_download_callback,
-                disabled=st.session_state.data_source == DataSource.DATABASE,
-            )
+            # AI Catalog section
+            st.subheader("☁️   DataRobot AI Catalog")
 
-            # Process form submission
-            if submit_button and len(selected_catalog_datasets) > 0:
-                # The callback will handle the download and processing
-                pass
-            elif submit_button:
-                st.warning("Please select at least one dataset")
+            # Get datasets from catalog
+            with st.spinner("Loading datasets from AI Catalog..."):
+                datasets = [i.model_dump() for i in list_catalog_datasets()]
 
-    # Database expander
-    with st.expander("Database", expanded=False):
-        get_database_logo(app_infra)
-
-        schema_tables = Database.get_tables()
-
-        # Create form for Database table selection
-        with st.form("table_selection_form", border=False):
-            selected_schema_tables = st.multiselect(
-                label=get_database_loader_message(app_infra),
-                options=schema_tables,
-                help="You can select multiple tables",
-                key="selected_schema_tables",
-                disabled=st.session_state.data_source is not None
-                and st.session_state.data_source != DataSource.DATABASE,
-            )
-
-            # Form submit button
-            submit_button = st.form_submit_button(
-                "Load Selected Tables",
-                use_container_width=False,
-                on_click=load_from_database_callback,
-                disabled=st.session_state.data_source is not None
-                and st.session_state.data_source != DataSource.DATABASE,
-            )
-
-            if submit_button and not selected_schema_tables:
-                st.warning("Please select at least one table")
-
-    # Add Clear Data button after the Database expander
-    st.sidebar.button(
-        "Clear Data",
-        on_click=clear_data_callback,
-        type="secondary",
-        use_container_width=False,
-    )
-
-# Main content area
-st.image(get_page_logo(), width=200)
-st.title("Explore")
-
-# Main content area - conditional rendering based on cleansed data
-if not st.session_state.cleansed_data:
-    st.info("Upload and process your data using the sidebar to get started")
-else:
-    for ds_clean in st.session_state.cleansed_data:
-        st.subheader(f"{ds_clean.name}")
-
-        # Display cleaning report in expander
-        with st.expander("View Cleaning Report"):
-            report = ds_clean.cleaning_report
-            if report.columns_cleaned:
-                st.write("**Columns Cleaned:**")
-                st.write(", ".join(report.columns_cleaned))
-
-                if report.warnings:
-                    st.write("**Warnings:**")
-                    for warning in report.warnings:
-                        st.write(f"- {warning}")
-
-                if report.errors:
-                    st.error("**Errors:**")
-                    for error in report.errors:
-                        st.write(f"- {error}")
-
-        # Display dataframe with column filters
-        df_display: pd.DataFrame = pd.DataFrame.from_records(ds_clean.data)
-
-        # Create column filters
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            search = st.text_input(
-                "Search columns",
-                key=f"search_{ds_clean.name}",
-                help="Filter columns by name",
-            )
-        with col2:
-            n_rows = int(
-                st.number_input(
-                    "Rows to display",
-                    min_value=1,
-                    max_value=len(df_display),
-                    value=min(10, len(df_display)),
-                    step=1,
-                    key=f"n_rows_{ds_clean.name}",
+            # Create form for dataset selection
+            with st.form("catalog_selection_form", border=False):
+                selected_catalog_datasets = st.multiselect(
+                    "Select datasets from AI Catalog",
+                    options=datasets,
+                    format_func=lambda x: f"{x['name']} ({x['size']})",
+                    help="You can select multiple datasets",
+                    key="selected_catalog_datasets",
+                    disabled=st.session_state.data_source == DataSource.DATABASE,
                 )
-            )
 
-        # Filter columns based on search
-        if search:
-            cols = [col for col in df_display.columns if search.lower() in col.lower()]
-        else:
-            cols = df_display.columns.tolist()
+                # Form submit button
+                submit_button = st.form_submit_button(
+                    "Load Datasets",
+                    disabled=st.session_state.data_source == DataSource.DATABASE,
+                )
 
-        # Display filtered dataframe
-        st.dataframe(df_display[cols].head(n_rows), use_container_width=True)
+                # Process form submission
+                if submit_button and len(selected_catalog_datasets) > 0:
+                    await catalog_download_callback()
+                elif submit_button:
+                    st.warning("Please select at least one dataset")
 
-        # Download button
-        col1, col2, col3 = st.columns([1, 3, 1])
-        with col1:
-            csv = df_display.to_csv(index=False)
-            st.download_button(
-                label="Download Cleansed Data",
-                data=csv,
-                file_name=f"{ds_clean.name}_cleansed.csv",
-                mime="text/csv",
-                key=f"download_{ds_clean.name}",
-            )
+        # Database expander
+        with st.expander("Database", expanded=False):
+            get_database_logo(app_infra)
 
-        st.markdown("---")
+            schema_tables = Database.get_tables()
+
+            # Create form for Database table selection
+            with st.form("table_selection_form", border=False):
+                selected_schema_tables = st.multiselect(
+                    label=get_database_loader_message(app_infra),
+                    options=schema_tables,
+                    help="You can select multiple tables",
+                    key="selected_schema_tables",
+                    disabled=st.session_state.data_source is not None
+                    and st.session_state.data_source != DataSource.DATABASE,
+                )
+
+                # Form submit button
+                submit_button = st.form_submit_button(
+                    "Load Selected Tables",
+                    use_container_width=False,
+                    disabled=st.session_state.data_source is not None
+                    and st.session_state.data_source != DataSource.DATABASE,
+                )
+
+                if submit_button:
+                    if len(selected_schema_tables) == 0:
+                        st.warning("Please select at least one table")
+                    else:
+                        await load_from_database_callback()
+
+        # Add Clear Data button after the Database expander
+        st.sidebar.button(
+            "Clear Data",
+            on_click=clear_data_callback,
+            type="secondary",
+            use_container_width=False,
+        )
+
+    # Main content area
+    st.image(get_page_logo(), width=200)
+    st.title("Explore")
+
+    # Main content area - conditional rendering based on cleansed data
+    if not st.session_state.datasets:
+        st.info("Upload and process your data using the sidebar to get started")
+    else:
+        st.session_state.datasets = cast(
+            list[AnalystDataset], st.session_state.datasets
+        )
+        st.session_state.cleansed_data = cast(
+            list[CleansedDataset], st.session_state.cleansed_data
+        )
+        for ds_display in st.session_state.datasets:
+            st.subheader(f"{ds_display.name}")
+            cleaning_report: CleansingReport | None = None
+            try:
+                cleaning_report = next(
+                    clean_ds.cleaning_report
+                    for clean_ds in st.session_state.cleansed_data
+                    if clean_ds.name == ds_display.name
+                )
+
+                # Display cleaning report in expander
+                with st.expander("View Cleaning Report"):
+                    report = cleaning_report
+                    if report.columns_cleaned:
+                        st.write("**Columns Cleaned:**")
+                        st.write(", ".join(report.columns_cleaned))
+
+                        if report.warnings:
+                            st.write("**Warnings:**")
+                            for warning in report.warnings:
+                                st.write(f"- {warning}")
+
+                        if report.errors:
+                            st.error("**Errors:**")
+                            for error in report.errors:
+                                st.write(f"- {error}")
+            except StopIteration:
+                pass
+
+            # Display dataframe with column filters
+            df_display = ds_display.to_df()
+
+            # Create column filters
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                search = st.text_input(
+                    "Search columns",
+                    key=f"search_{ds_display.name}",
+                    help="Filter columns by name",
+                )
+            with col2:
+                n_rows = int(
+                    st.number_input(
+                        "Rows to display",
+                        min_value=1,
+                        max_value=len(df_display),
+                        value=min(10, len(df_display)),
+                        step=1,
+                        key=f"n_rows_{ds_display.name}",
+                    )
+                )
+
+            # Filter columns based on search
+            if search:
+                cols = [
+                    col for col in df_display.columns if search.lower() in col.lower()
+                ]
+            else:
+                cols = df_display.columns.tolist()
+
+            # Display filtered dataframe
+            st.dataframe(df_display[cols].head(n_rows), use_container_width=True)
+
+            # Download button
+            col1, col2, col3 = st.columns([1, 3, 1])
+            with col1:
+                csv = df_display.to_csv(index=False)
+                st.download_button(
+                    label="Download Cleansed Data",
+                    data=csv,
+                    file_name=f"{ds_display.name}_cleansed.csv",
+                    mime="text/csv",
+                    key=f"download_{ds_display.name}",
+                )
+
+            st.markdown("---")
+
+
+if __name__ == "__main__":
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(main())

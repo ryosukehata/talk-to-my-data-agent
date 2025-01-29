@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any, Literal, cast
+from typing import Any, Literal
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -31,9 +31,9 @@ from openai.types.chat.chat_completion_user_message_param import (
 )
 from pydantic import (
     BaseModel,
-    BeforeValidator,
     ConfigDict,
     Field,
+    PrivateAttr,
     field_validator,
 )
 
@@ -50,44 +50,39 @@ class AiCatalogDataset(BaseModel):
     size: str
 
 
-def _convert_to_records(v: Any) -> list[dict[str, Any]]:
-    if isinstance(v, pd.DataFrame):
-        return cast(list[dict[str, Any]], v.to_dict("records"))
-    if isinstance(v, list):
-        return v
-    raise ValueError(f"Expected DataFrame or list of dicts, got {type(v)}")
-
-
 class AnalystDataset(BaseModel):
     name: str
-    data: Annotated[list[dict[str, Any]], BeforeValidator(_convert_to_records)]
-    columns: list[str] = Field(default_factory=list)
+    _data: pd.DataFrame = PrivateAttr(default_factory=pd.DataFrame)
+    data: list[dict[str, Any]] = Field(
+        description="List of records with column names as keys",
+        json_schema_extra={
+            "example": [
+                {"column1": "value1", "column2": "value2"},
+                {"column1": "value3", "column2": "value4"},
+            ]
+        },
+    )
 
-    def __init__(
-        self,
-        data: list[dict[str, Any]] | pd.DataFrame,
-        name: str = "analysis_data",
-        **kwargs: Any,
-    ):
-        if "columns" in kwargs:
-            columns = kwargs.pop("columns")
-        elif isinstance(data, pd.DataFrame):
-            columns = list(data.columns)
-        elif isinstance(data, list):
-            try:
-                columns = list(data[0].keys())
-            except Exception:
-                columns = []
+    def __init__(self, **data: Any):
+        df = None
+        if "data" in data and isinstance(data["data"], pd.DataFrame):
+            df = data["data"]
+            records = df.to_dict("records")
+            data["data"] = records
+        if "name" not in data:
+            data["name"] = "analyst_dataset"
+        super().__init__(**data)
+        if df is not None:
+            self._data = df
         else:
-            raise ValueError("data has to be either list of records or pd.DataFrame")
-        super().__init__(name=name, data=data, columns=columns, **kwargs)
+            self._data = pd.DataFrame.from_records(self.data)
+
+    @property
+    def columns(self) -> list[str]:
+        return self._data.columns.tolist()
 
     def to_df(self) -> pd.DataFrame:
-        df = pd.DataFrame.from_records(self.data)
-        if not len(df) and self.columns:
-            # If DataFrame is empty and we have stored columns, create empty DF with those columns
-            return pd.DataFrame(columns=self.columns)
-        return df
+        return self._data
 
 
 class CleansingReport(BaseModel):
@@ -96,8 +91,16 @@ class CleansingReport(BaseModel):
     warnings: list[str]
 
 
-class CleansedDataset(AnalystDataset):
+class CleansedDataset(BaseModel):
+    dataset: AnalystDataset
     cleaning_report: CleansingReport
+
+    @property
+    def name(self) -> str:
+        return self.dataset.name
+
+    def to_df(self) -> pd.DataFrame:
+        return self.dataset.to_df()
 
 
 class DataDictionaryColumn(BaseModel):
@@ -108,7 +111,7 @@ class DataDictionaryColumn(BaseModel):
 
 class DataDictionary(BaseModel):
     name: str
-    dictionary: list[DataDictionaryColumn]
+    column_descriptions: list[DataDictionaryColumn]
 
     @classmethod
     def from_df(
@@ -119,7 +122,7 @@ class DataDictionary(BaseModel):
     ) -> "DataDictionary":
         return DataDictionary(
             name=name,
-            dictionary=[
+            column_descriptions=[
                 DataDictionaryColumn(
                     column=col,
                     description=column_descriptions,
@@ -127,6 +130,15 @@ class DataDictionary(BaseModel):
                 )
                 for col in df.columns
             ],
+        )
+
+    def to_df(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "column": [c.column for c in self.column_descriptions],
+                "description": [c.description for c in self.column_descriptions],
+                "data_type": [c.data_type for c in self.column_descriptions],
+            }
         )
 
 
@@ -193,21 +205,9 @@ class DictionaryGeneration(BaseModel):
 
 
 class RunAnalysisRequest(BaseModel):
-    """Request model for analysis endpoint
-
-    Attributes:
-        data: Dictionary of datasets, where each dataset is a list of dictionaries
-        dictionary: Dictionary of data dictionaries, where each dictionary describes a dataset's columns
-        question: Business question to analyze
-        error_message: Optional error from previous attempt
-        failed_code: Optional code that failed in previous attempt
-    """
-
-    data: list[CleansedDataset]
-    dictionary: list[DataDictionary]
+    datasets: list[AnalystDataset]
+    dictionaries: list[DataDictionary]
     question: str
-    error_message: str | None = None
-    failed_code: str | None = None
 
 
 class RunAnalysisResultMetadata(BaseModel):
@@ -219,11 +219,24 @@ class RunAnalysisResultMetadata(BaseModel):
 
 
 class RunAnalysisResult(BaseModel):
-    status: str
-    metadata: DatabaseExecutionMetadata | RunAnalysisResultMetadata
-    data: AnalystDataset | None = None
+    status: Literal["success", "error"]
+    metadata: RunAnalysisResultMetadata
+    dataset: AnalystDataset | None = None
     code: str | None = None
-    suggestions: str | None = None
+
+
+class RunDatabaseAnalysisResultMetadata(BaseModel):
+    duration: float
+    attempts: int
+    datasets_analyzed: int | None = None
+    total_columns_analyzed: int | None = None
+
+
+class RunDatabaseAnalysisResult(BaseModel):
+    status: Literal["success", "error"]
+    metadata: RunDatabaseAnalysisResultMetadata
+    dataset: AnalystDataset | None = None
+    code: str | None = None
 
 
 class ChartGenerationExecutionResult(BaseModel):
@@ -234,23 +247,12 @@ class ChartGenerationExecutionResult(BaseModel):
 
 
 class RunChartsRequest(BaseModel):
-    """Request model for charts endpoint
-
-    Attributes:
-        data: list of dictionaries representing a single dataset
-        question: Business question to visualize
-        error_message: Optional error from previous attempt
-        failed_code: Optional code that failed in previous attempt
-    """
-
-    data: AnalystDataset  # Allow both string and integer keys
+    dataset: AnalystDataset
     question: str
-    error_message: str | None = None
-    failed_code: str | None = None
 
 
 class RunChartsResult(BaseModel):
-    status: str
+    status: Literal["success", "error"]
     fig1_json: str | None = None
     fig2_json: str | None = None
     code: str | None = None
@@ -278,21 +280,16 @@ class BusinessAnalysisGeneration(BaseModel):
     follow_up_questions: list[str]
 
 
-class RunBusinessAnalysisResult(BusinessAnalysisGeneration):
+class RunBusinessAnalysisResult(BaseModel):
+    bottom_line: str
+    additional_insights: str
+    follow_up_questions: list[str]
     metadata: RunBusinessAnalysisMetadata
 
 
 class RunBusinessAnalysisRequest(BaseModel):
-    """Request model for business analysis endpoint
-
-    Attributes:
-        data: list of dictionaries representing a single dataset
-        dictionary: list of dictionary entries describing columns
-        question: Business question to analyze
-    """
-
-    data: AnalystDataset  # Allow both string and integer keys
-    dictionary: DataDictionary  # Allow both string and integer keys
+    dataset: AnalystDataset
+    dictionary: DataDictionary
     question: str
 
 
@@ -309,8 +306,6 @@ class ChatRequest(BaseModel):
 
 
 class QuestionListGeneration(BaseModel):
-    """Container for list of questions"""
-
     questions: list[str]
 
 
@@ -318,42 +313,17 @@ class ValidatedQuestion(BaseModel):
     """Stores validation results for suggested questions"""
 
     question: str
-    is_valid: bool
-    available_columns: list[str]
-    missing_columns: list[str]
-    validation_message: str
 
 
 class RunDatabaseAnalysisRequest(BaseModel):
-    """Request model for Database analysis endpoint
-
-    Attributes:
-        data: dictionary of sample data from each table
-        dictionary: dictionary of data dictionaries for each table
-        question: Business question to analyze
-        error_message: Optional error from previous attempt
-        failed_code: Optional code that failed in previous attempt
-    """
-
-    data: list[AnalystDataset]  # Sample data from each table
-    dictionary: list[DataDictionary]  # Pre-generated data dictionary
+    datasets: list[AnalystDataset]
+    dictionaries: list[DataDictionary]
     question: str = Field(min_length=1)
-    error_message: str | None = None
-    failed_code: str | None = None
 
 
 class DatabaseAnalysisCodeGeneration(BaseModel):
     code: str
     description: str
-
-
-class DatabaseExecutionMetadata(BaseModel):
-    query_id: str
-    row_count: int
-    execution_time: float
-    db_schema: str
-    database: str | None = None
-    warehouse: str | None = None
 
 
 class EnhancedQuestionGeneration(BaseModel):
@@ -373,7 +343,13 @@ class AppInfra(BaseModel):
 class AnalystChatMessage(BaseModel):
     role: Literal["assistant", "user", "system"]
     content: str
-    components: list[RunAnalysisResult | RunChartsResult | RunBusinessAnalysisResult]
+    components: list[
+        RunAnalysisResult
+        | RunChartsResult
+        | RunBusinessAnalysisResult
+        | EnhancedQuestionGeneration
+        | RunDatabaseAnalysisResult
+    ]
 
     def to_openai_message_param(self) -> ChatCompletionMessageParam:
         if self.role == "user":

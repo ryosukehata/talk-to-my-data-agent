@@ -16,7 +16,6 @@ import logging
 import sys
 from typing import cast
 
-import pandas as pd
 import streamlit as st
 
 sys.path.append("..")
@@ -49,7 +48,6 @@ else:
     # Add debug logging
     logger.info("Data Dictionary page loaded")
     logger.info(f"Session state keys: {st.session_state.keys()}")
-    logger.info(f"data_dictionaries content: {st.session_state.data_dictionaries}")
 
     logger.info(f"Found {len(st.session_state.data_dictionaries)} dictionaries")
 
@@ -62,7 +60,7 @@ else:
 
         try:
             # Convert dictionary to DataFrame
-            dict_df = pd.DataFrame(dictionary.model_dump()["dictionary"])
+            dict_df = dictionary.to_df()
             logger.info(
                 f"Created DataFrame for {dictionary.name} with shape {dict_df.shape}"
             )

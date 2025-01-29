@@ -21,10 +21,12 @@ import uuid
 from typing import Callable
 
 import datarobot as dr
+import pandas as pd
 import pytest
 from dotenv import dotenv_values
 
 from utils.resources import LLMDeployment
+from utils.schema import AnalystDataset
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -176,3 +178,18 @@ def url_diabetes():
 @pytest.fixture(scope="module")
 def url_mpg():
     return DATA_FILES["mpg"]
+
+
+@pytest.fixture(scope="module")
+def dataset_loaded(url_diabetes: str) -> AnalystDataset:
+    df = pd.read_csv(url_diabetes)
+    # Replace non-JSON compliant values
+    df = df.replace([float("inf"), -float("inf")], None)  # Replace infinity with None
+    df = df.where(pd.notnull(df), None)  # Replace NaN with None
+
+    # Create dataset dictionary
+    dataset = AnalystDataset(
+        name=os.path.splitext(os.path.basename(url_diabetes))[0],
+        data=df,
+    )
+    return dataset

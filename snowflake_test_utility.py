@@ -31,7 +31,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from utils.rest_api import (  # type: ignore[attr-defined]
-    get_dictionary,
+    get_dictionaries,
     rephrase_message,
     run_database_analysis,
     suggest_questions,
@@ -313,7 +313,7 @@ async def main() -> None:
                     for table in selected_tables
                 ]
 
-                dictionary_result = await get_dictionary(datasets)
+                dictionary_result = await get_dictionaries(datasets)
                 progress.update(task, completed=True)
 
                 # Display dictionary results
@@ -334,7 +334,7 @@ async def main() -> None:
                 formatted_dict: dict[str, Any] = {}
                 for dict_entry in dictionary_result:
                     table_name = dict_entry.name
-                    for col_info in dict_entry.dictionary:
+                    for col_info in dict_entry.column_descriptions:
                         dict_table.add_row(
                             table_name,
                             col_info.column,
@@ -445,11 +445,11 @@ async def main() -> None:
 
             # Create analysis request
             analysis_request = RunDatabaseAnalysisRequest(
-                data={
+                datasets={
                     table: metadata["sample_data"]
                     for table, metadata in tables_metadata.items()
                 },
-                dictionary=dictionary_result,
+                dictionaries=dictionary_result,
                 question=enhanced_question,
                 warehouse=credentials["warehouse"],
                 database=credentials["database"],
@@ -593,11 +593,11 @@ async def main() -> None:
 
                 # Create new analysis request
                 analysis_request = RunDatabaseAnalysisRequest(
-                    data={
+                    datasets={
                         table: metadata["sample_data"]
                         for table, metadata in tables_metadata.items()
                     },
-                    dictionary=dictionary_result,
+                    dictionaries=dictionary_result,
                     question=enhanced_question,
                     warehouse=credentials["warehouse"],
                     database=credentials["database"],

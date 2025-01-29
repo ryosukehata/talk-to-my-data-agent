@@ -18,7 +18,6 @@ import functools
 import json
 import logging
 import os
-import time
 import traceback
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -43,7 +42,6 @@ from utils.prompts import SYSTEM_PROMPT_BIGQUERY, SYSTEM_PROMPT_SNOWFLAKE
 from utils.schema import (
     AnalystDataset,
     AppInfra,
-    DatabaseExecutionMetadata,
 )
 
 logger = logging.getLogger("DataAnalystFrontend")
@@ -78,9 +76,7 @@ class DatabaseOperator(ABC, Generic[T]):
     @abstractmethod
     def execute_query(
         self, query: str, timeout: int | None = None
-    ) -> tuple[
-        (list[tuple[Any, ...]] | list[dict[str, Any]]), DatabaseExecutionMetadata
-    ]: ...
+    ) -> list[tuple[Any, ...]] | list[dict[str, Any]]: ...
 
     @abstractmethod
     def get_tables(self, timeout: int | None = None) -> list[str]:
@@ -113,12 +109,8 @@ class NoDatabaseOperator(DatabaseOperator[NoDatabaseCredentialArgs]):
         self,
         query: str,
         timeout: int | None = 300,
-    ) -> tuple[
-        (list[tuple[Any, ...]] | list[dict[str, Any]]), DatabaseExecutionMetadata
-    ]:
-        return [], DatabaseExecutionMetadata(
-            query_id="", row_count=0, execution_time=0, db_schema=""
-        )
+    ) -> list[tuple[Any, ...]] | list[dict[str, Any]]:
+        return []
 
     def get_tables(self, timeout: int | None = 300) -> list[str]:
         return []
@@ -198,9 +190,7 @@ class SnowflakeOperator(DatabaseOperator[SnowflakeCredentialArgs]):
 
     def execute_query(
         self, query: str, timeout: int | None = None
-    ) -> tuple[
-        (list[tuple[Any, ...]] | list[dict[str, Any]]), DatabaseExecutionMetadata
-    ]:
+    ) -> list[tuple[Any, ...]] | list[dict[str, Any]]:
         """Execute a Snowflake query with timeout and metadata capture
 
         Args:
@@ -217,8 +207,6 @@ class SnowflakeOperator(DatabaseOperator[SnowflakeCredentialArgs]):
             with self.create_connection() as conn:
                 with conn.cursor(snowflake.connector.DictCursor) as cursor:
                     cursor = conn.cursor(snowflake.connector.DictCursor)
-                    start_time = time.time()
-
                     # Set query timeout at cursor level
                     cursor.execute(
                         f"ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = {timeout}"
@@ -231,23 +219,7 @@ class SnowflakeOperator(DatabaseOperator[SnowflakeCredentialArgs]):
                         # Get results
                         results = cursor.fetchall()
 
-                        # Get query ID from the cursor
-                        query_id = cursor.sfqid
-
-                        # Calculate execution time
-                        execution_time = time.time() - start_time
-
-                        # Prepare metadata
-                        metadata = DatabaseExecutionMetadata(
-                            query_id=query_id,
-                            row_count=len(results),
-                            execution_time=execution_time,
-                            warehouse=conn.warehouse,
-                            database=conn.database,
-                            db_schema=conn.schema,
-                        )
-
-                        return results, metadata
+                        return results
 
                     except snowflake.connector.errors.ProgrammingError as e:
                         # Handle Snowflake-specific errors
@@ -452,36 +424,19 @@ class BigQueryOperator(DatabaseOperator[BigQueryCredentialArgs]):
 
     def execute_query(
         self, query: str, timeout: int | None = None
-    ) -> tuple[
-        (list[tuple[Any, ...]] | list[dict[str, Any]]), DatabaseExecutionMetadata
-    ]:
+    ) -> list[tuple[Any, ...]] | list[dict[str, Any]]:
         conn: bigquery.Client
         timeout = timeout if timeout is not None else self.default_timeout
         try:
             with self.create_connection() as conn:
-                start_time = time.time()
                 results = conn.query(query, timeout=timeout)
 
                 sql_result: pd.DataFrame = results.to_dataframe()
 
-                # Get query ID from the cursor
-                query_id = "" if results.query_id is None else results.query_id
-
-                # Calculate execution time
-                execution_time = time.time() - start_time
-
-                # Prepare metadata
-                metadata = DatabaseExecutionMetadata(
-                    query_id=query_id,
-                    row_count=len(sql_result),
-                    execution_time=execution_time,
-                    db_schema=self._credentials.db_schema,
-                    database=self._database,
-                )
                 sql_result_as_dicts = cast(
                     list[dict[str, Any]], sql_result.to_dict(orient="records")
                 )
-                return sql_result_as_dicts, metadata
+                return sql_result_as_dicts
 
         except Exception as e:
             raise InvalidGeneratedCode(

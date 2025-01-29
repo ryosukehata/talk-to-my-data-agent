@@ -38,6 +38,7 @@ custom_model_args = CustomModelArgs(
     base_environment_id=GlobalRuntimeEnvironment.PYTHON_311_MODERATIONS.value.id,
     target_name=LLMDeploymentSettings().target_feature_name,
     target_type=dr.enums.TARGET_TYPE.TEXT_GENERATION,
+    replicas=2,
     opts=pulumi.ResourceOptions(delete_before_replace=True),
 )
 

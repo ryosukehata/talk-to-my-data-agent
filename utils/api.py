@@ -24,7 +24,6 @@ import tempfile
 from datetime import datetime
 from typing import (
     Any,
-    Sequence,
     TypeVar,
     cast,
 )
@@ -35,7 +34,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from joblib import Memory
-from openai import OpenAI
+from openai import AsyncOpenAI
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from openai.types.chat.chat_completion_system_message_param import (
     ChatCompletionSystemMessageParam,
@@ -82,6 +81,8 @@ from utils.schema import (
     RunChartsRequest,
     RunChartsResult,
     RunDatabaseAnalysisRequest,
+    RunDatabaseAnalysisResult,
+    RunDatabaseAnalysisResultMetadata,
     ValidatedQuestion,
 )
 
@@ -94,12 +95,13 @@ try:
         dr_client.endpoint + f"/deployments/{chat_agent_deployment_id}/"
     )
 
-    openai_client = OpenAI(
+    openai_client = AsyncOpenAI(
         api_key=dr_client.token,
         base_url=deployment_chat_base_url,
         timeout=90,
         max_retries=2,
     )
+
     client = instructor.from_openai(openai_client, mode=instructor.Mode.MD_JSON)
 
 
@@ -198,7 +200,7 @@ def download_catalog_datasets(*args: Any) -> list[AnalystDataset]:
         *args: list of dataset IDs to download
 
     Returns:
-        list[DatasetInput]: Dictionary of dataset names and data
+        list[AnalystDataset]: Dictionary of dataset names and data
     """
     dataset_ids = list(args)
     datasets = [dr.Dataset.get(id_) for id_ in dataset_ids]  # type: ignore
@@ -225,6 +227,7 @@ def download_catalog_datasets(*args: Any) -> list[AnalystDataset]:
     return result_datasets
 
 
+@cache
 async def _get_dictionary_batch(
     columns: list[str], df: pd.DataFrame, batch_size: int = 5
 ) -> list[DataDictionaryColumn]:
@@ -232,70 +235,72 @@ async def _get_dictionary_batch(
 
     # Get sample data and stats for just these columns
     # Convert timestamps to ISO format strings for JSON serialization
-    sample_data = {}
-    for col in columns:
-        if pd.api.types.is_datetime64_any_dtype(df[col]):
-            # Convert timestamps to ISO format strings
-            sample_data[col] = (
-                df[col]
-                .head(10)
-                .apply(lambda x: x.isoformat() if pd.notnull(x) else None)
-                .to_dict()
-            )
-        else:
-            sample_data[col] = df[col].head(10).to_dict()
+    try:
+        sample_data = {}
+        for col in columns:
+            if pd.api.types.is_datetime64_any_dtype(df[col]):
+                # Convert timestamps to ISO format strings
+                sample_data[col] = (
+                    df[col]
+                    .head(10)
+                    .apply(lambda x: x.isoformat() if pd.notnull(x) else None)
+                    .to_dict()
+                )
+            else:
+                sample_data[col] = df[col].head(10).to_dict()
 
-    # Handle numeric summary
-    numeric_summary = {}
-    for col in columns:
-        if pd.api.types.is_numeric_dtype(df[col]):
-            desc = df[col].describe()
-            numeric_summary[col] = {
-                k: float(v) if pd.notnull(v) else None
-                for k, v in desc.to_dict().items()
-            }
+        # Handle numeric summary
+        numeric_summary = {}
+        for col in columns:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                desc = df[col].describe()
+                numeric_summary[col] = {
+                    k: float(v) if pd.notnull(v) else None
+                    for k, v in desc.to_dict().items()
+                }
 
-    # Get categories for non-numeric columns
-    categories = []
-    for column in columns:
-        if not pd.api.types.is_numeric_dtype(df[column]):
-            try:
-                value_counts = df[column].value_counts().head(10)
-                # Convert any timestamp values to strings
-                if pd.api.types.is_datetime64_any_dtype(df[column]):
-                    value_counts.index = value_counts.index.map(
-                        lambda x: x.isoformat() if pd.notnull(x) else None
-                    )
-                categories.append({column: list(value_counts.keys())})
-            except Exception:
-                continue
+        # Get categories for non-numeric columns
+        categories = []
+        for column in columns:
+            if not pd.api.types.is_numeric_dtype(df[column]):
+                try:
+                    value_counts = df[column].value_counts().head(10)
+                    # Convert any timestamp values to strings
+                    if pd.api.types.is_datetime64_any_dtype(df[column]):
+                        value_counts.index = value_counts.index.map(
+                            lambda x: x.isoformat() if pd.notnull(x) else None
+                        )
+                    categories.append({column: list(value_counts.keys())})
+                except Exception:
+                    continue
 
-    # Create messages for OpenAI
-    messages: list[ChatCompletionMessageParam] = [
-        ChatCompletionSystemMessageParam(
-            role="system", content=prompts.SYSTEM_PROMPT_GET_DICTIONARY
-        ),
-        ChatCompletionUserMessageParam(role="user", content=f"Data:\n{sample_data}\n"),
-        ChatCompletionUserMessageParam(
-            role="user", content=f"Statistical Summary:\n{numeric_summary}\n"
-        ),
-    ]
-
-    if categories:
-        messages.append(
+        # Create messages for OpenAI
+        messages: list[ChatCompletionMessageParam] = [
+            ChatCompletionSystemMessageParam(
+                role="system", content=prompts.SYSTEM_PROMPT_GET_DICTIONARY
+            ),
             ChatCompletionUserMessageParam(
-                role="user", content=f"Categorical Values:\n{categories}\n"
+                role="user", content=f"Data:\n{sample_data}\n"
+            ),
+            ChatCompletionUserMessageParam(
+                role="user", content=f"Statistical Summary:\n{numeric_summary}\n"
+            ),
+        ]
+
+        if categories:
+            messages.append(
+                ChatCompletionUserMessageParam(
+                    role="user", content=f"Categorical Values:\n{categories}\n"
+                )
             )
+
+        # Get descriptions from OpenAI
+        completion: DictionaryGeneration = await client.chat.completions.create(
+            response_model=DictionaryGeneration,
+            model=ALTERNATIVE_LLM_SMALL,
+            messages=messages,
         )
 
-    # Get descriptions from OpenAI
-    completion: DictionaryGeneration = client.chat.completions.create(
-        response_model=DictionaryGeneration,
-        model=ALTERNATIVE_LLM_SMALL,
-        messages=messages,
-    )
-
-    try:
         # Convert to dictionary format
         descriptions = completion.to_dict()
 
@@ -321,8 +326,9 @@ async def _get_dictionary_batch(
         ]
 
 
-async def _get_dictionary(dataset: AnalystDataset) -> DataDictionary:
+async def _get_dictionaries(dataset: AnalystDataset) -> DataDictionary:
     """Process a single dataset with parallel column batch processing"""
+
     try:
         # Convert JSON to DataFrame
         df = dataset.to_df()
@@ -335,7 +341,7 @@ async def _get_dictionary(dataset: AnalystDataset) -> DataDictionary:
             logger.warning(f"Dataset {dataset.name} is empty")
             return DataDictionary(
                 name=dataset.name,
-                dictionary=[],
+                column_descriptions=[],
             )
 
         # Split columns into batches
@@ -361,7 +367,7 @@ async def _get_dictionary(dataset: AnalystDataset) -> DataDictionary:
 
         return DataDictionary(
             name=dataset.name,
-            dictionary=dictionary,
+            column_descriptions=dictionary,
         )
 
     except Exception as e:
@@ -370,7 +376,7 @@ async def _get_dictionary(dataset: AnalystDataset) -> DataDictionary:
 
 def _validate_question_feasibility(
     question: str, available_columns: list[str]
-) -> ValidatedQuestion:
+) -> ValidatedQuestion | None:
     """Validate if a question can be answered with available data
 
     Checks if common data elements mentioned in the question exist in columns
@@ -384,24 +390,13 @@ def _validate_question_feasibility(
 
     # Find matches and missing terms
     found_columns = [col for col in columns_lower if any(word in col for word in words)]
-    missing_columns = [
-        word for word in words if any(word in col for col in columns_lower)
-    ]
 
     is_valid = len(found_columns) > 0
-    message = (
-        "Question can be answered with available data"
-        if is_valid
-        else "Question may require unavailable data"
-    )
-
-    return ValidatedQuestion(
-        question=question,
-        is_valid=is_valid,
-        available_columns=found_columns,
-        missing_columns=missing_columns,
-        validation_message=message,
-    )
+    if is_valid:
+        return ValidatedQuestion(
+            question=question,
+        )
+    return None
 
 
 async def suggest_questions(
@@ -424,7 +419,7 @@ async def suggest_questions(
             DataDictionary.from_df(
                 ds.to_df(),
                 column_descriptions=f"Column from dataset {ds.name}",
-            ).dictionary
+            ).column_descriptions
             for ds in datasets
         ],
         [],
@@ -464,7 +459,7 @@ async def suggest_questions(
         ),
     ]
 
-    completion: QuestionListGeneration = client.chat.completions.create(
+    completion: QuestionListGeneration = await client.chat.completions.create(
         response_model=QuestionListGeneration,
         model=ALTERNATIVE_LLM_SMALL,
         messages=messages,
@@ -474,9 +469,9 @@ async def suggest_questions(
     validated_questions: list[ValidatedQuestion] = []
 
     for question in completion.questions:
-        validated_questions.append(
-            _validate_question_feasibility(question, available_columns)
-        )
+        validated_question = _validate_question_feasibility(question, available_columns)
+        if validated_question is not None:
+            validated_questions.append(validated_question)
 
     return validated_questions
 
@@ -484,7 +479,7 @@ async def suggest_questions(
 async def _generate_run_charts_python_code(
     request: RunChartsRequest, validation_error: InvalidGeneratedCode | None = None
 ) -> str:
-    df = request.data.to_df()
+    df = request.dataset.to_df()
     question = request.question
     dataframe_metadata = {
         "shape": {"rows": int(df.shape[0]), "columns": int(df.shape[1])},
@@ -524,7 +519,7 @@ async def _generate_run_charts_python_code(
         )
 
     # Get response based on model mode
-    response: CodeGeneration = client.chat.completions.create(
+    response: CodeGeneration = await client.chat.completions.create(
         response_model=CodeGeneration,
         model=ALTERNATIVE_LLM_BIG,
         temperature=0,
@@ -551,8 +546,8 @@ async def _generate_run_analysis_python_code(
     all_descriptions = []
     all_data_types = []
 
-    for dictionary in request.dictionary:
-        for entry in dictionary.dictionary:
+    for dictionary in request.dictionaries:
+        for entry in dictionary.column_descriptions:
             all_columns.append(f"{dictionary.name}.{entry.column}")
             all_descriptions.append(entry.description)
             all_data_types.append(entry.data_type)
@@ -568,7 +563,7 @@ async def _generate_run_analysis_python_code(
     all_samples = []
     all_shapes = []
 
-    for dataset in request.data:
+    for dataset in request.datasets:
         df = dataset.to_df()
         all_shapes.append(f"{dataset.name}: {df.shape[0]} rows x {df.shape[1]} columns")
         # Limit sample to 10 rows
@@ -618,17 +613,17 @@ async def _generate_run_analysis_python_code(
             ]
         )
 
-    completion: CodeGeneration = client.chat.completions.create(
+    completion: CodeGeneration = await client.chat.completions.create(
         response_model=CodeGeneration,
         model=ALTERNATIVE_LLM_BIG,
         temperature=0.1,
         messages=messages,
+        max_retries=10,
     )
 
     return completion.code
 
 
-@cache
 async def cleanse_dataframes(
     datasets: list[AnalystDataset],
 ) -> list[CleansedDataset]:
@@ -636,16 +631,18 @@ async def cleanse_dataframes(
     cleaned_datasets = []
 
     for dataset in datasets:
-        df = dataset.to_df()
-        if df.empty:
+        cleaned_df = dataset.to_df()
+        if cleaned_df.empty:
             raise ValueError(f"Dataset {dataset.name} is empty")
 
         report = CleansingReport(columns_cleaned=[], errors=[], warnings=[])
 
         # Clean column names
-        original_cols = df.columns.tolist()
-        df.columns = [re.sub(r"\s+", " ", col.strip()) for col in df.columns]  # type: ignore[assignment]
-        cleaned_cols = df.columns.tolist()
+        original_cols = cleaned_df.columns.tolist()
+        cleaned_df.columns = [
+            re.sub(r"\s+", " ", col.strip()) for col in cleaned_df.columns
+        ]  # type: ignore[assignment]
+        cleaned_cols = cleaned_df.columns.tolist()
 
         # Track column name changes
         for orig, cleaned in zip(original_cols, cleaned_cols):
@@ -654,81 +651,83 @@ async def cleanse_dataframes(
                 report.warnings.append(f"Column '{orig}' renamed to '{cleaned}'")
 
         # Process each column
-        for col in df.columns:
+        for col in cleaned_df.columns:
             try:
-                original = df[col].copy()
+                original = cleaned_df[col].copy()
 
                 # Handle numeric columns
-                if pd.api.types.is_numeric_dtype(df[col]):
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-                    if not df[col].equals(original):
+                if pd.api.types.is_numeric_dtype(cleaned_df[col]):
+                    cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors="coerce")
+                    if not cleaned_df[col].equals(original):
                         report.columns_cleaned.append(col)
 
                 # Handle potential numeric strings (with currency/percentage)
                 elif (
-                    df[col].dtype == "object"
-                    and df[col].notna().all()
-                    and df[col]
+                    cleaned_df[col].dtype == "object"
+                    and cleaned_df[col].notna().all()
+                    and cleaned_df[col]
                     .str.replace(r"[$%,\s]", "", regex=True)
                     .str.match(r"^-?\d*\.?\d*$")
                     .all()
                 ):
-                    df[col] = pd.to_numeric(
-                        df[col].astype(str).str.replace(r"[$%,\s]", "", regex=True),
+                    cleaned_df[col] = pd.to_numeric(
+                        cleaned_df[col]
+                        .astype(str)
+                        .str.replace(r"[$%,\s]", "", regex=True),
                         errors="coerce",
                     )
                     report.columns_cleaned.append(col)
 
                 # Handle dates
-                elif is_date_column(df[col]):
-                    df[col] = convert_datetime_series(df[col])
-                    if not df[col].equals(original):
+                elif is_date_column(cleaned_df[col]):
+                    cleaned_df[col] = convert_datetime_series(cleaned_df[col])
+                    if not cleaned_df[col].equals(original):
                         report.columns_cleaned.append(col)
 
                 # Handle categorical
-                elif df[col].dtype == "object":
-                    mask = df[col].notna()
+                elif cleaned_df[col].dtype == "object":
+                    mask = cleaned_df[col].notna()
                     if mask.any():
-                        temp = df.loc[mask, col]
+                        temp = cleaned_df.loc[mask, col]
                         if not pd.api.types.is_string_dtype(temp):
                             temp = temp.astype(str)
-                        df.loc[mask, col] = temp.str.strip()
-                        if not df[col].equals(original):
+                        cleaned_df.loc[mask, col] = temp.str.strip()
+                        if not cleaned_df[col].equals(original):
                             report.columns_cleaned.append(col)
-
+                cleaned_df = cleaned_df.replace({pd.NaT: None})
             except Exception as e:
                 report.errors.append(f"Error processing column {col}: {str(e)}")
 
         cleaned_datasets.append(
             CleansedDataset(
-                name=dataset.name,
-                data=df.replace({pd.NaT: None}).to_dict("records"),
+                dataset=AnalystDataset(
+                    name=dataset.name,
+                    data=cleaned_df,
+                ),
                 cleaning_report=report,
             )
         )
     return cleaned_datasets
 
 
-async def get_dictionary(
-    datasets: Sequence[AnalystDataset],
-) -> list[DataDictionary]:
+async def get_dictionaries(datasets: list[AnalystDataset]) -> list[DataDictionary]:
     """
     Generate data dictionary for multiple datasets.
 
     Parameters:
-    - datasets: list[DatasetInput] containing datasets
+    - datasets: list[AnalystDataset] containing datasets
 
     Returns:
     - Dictionary containing column descriptions and metadata
     """
+
     try:
         # Add debug logging
         logger.info(f"Received dictionary request with {len(datasets)} datasets")
 
-        tasks = [_get_dictionary(dataset) for dataset in datasets]
+        tasks = [_get_dictionaries(dataset) for dataset in datasets]
 
         results = await asyncio.gather(*tasks)
-        # Process datasets using ThreadPoolExecutor instead of ProcessPoolExecutor
 
         logger.info(f"Returning dictionary response with {len(results)} results")
         return results
@@ -764,7 +763,7 @@ async def rephrase_message(messages: ChatRequest) -> str:
         ),
     ]
 
-    completion: EnhancedQuestionGeneration = client.chat.completions.create(
+    completion: EnhancedQuestionGeneration = await client.chat.completions.create(
         response_model=EnhancedQuestionGeneration,
         model=ALTERNATIVE_LLM_BIG,
         messages=prompt_messages,
@@ -782,10 +781,10 @@ async def _run_charts(
     # Create messages for OpenAI
     start_time = datetime.now()
 
-    if not request.data:
+    if not request.dataset:
         raise ValueError("Input data cannot be empty")
 
-    df = request.data.to_df()
+    df = request.dataset.to_df()
     if exception_history is None:
         exception_history = []
 
@@ -814,6 +813,7 @@ async def _run_charts(
         raise InvalidGeneratedCode(code=code, exception=e)
 
     duration = datetime.now() - start_time
+
     return RunChartsResult(
         status="success",
         code=code,
@@ -826,16 +826,18 @@ async def _run_charts(
     )
 
 
-async def run_charts(
-    request: RunChartsRequest,
-) -> RunChartsResult:
+async def run_charts(request: RunChartsRequest) -> RunChartsResult:
     """Execute analysis workflow on datasets."""
     try:
         chart_result = await _run_charts(request)
         return chart_result
+    except ValidationError:
+        return RunChartsResult(
+            status="error", metadata=RunAnalysisResultMetadata(duration=0, attempts=1)
+        )
     except MaxReflectionAttempts as e:
         return RunChartsResult(
-            status="failed",
+            status="error",
             metadata=RunAnalysisResultMetadata(
                 duration=e.duration,
                 attempts=len(e.exception_history) if e.exception_history else 0,
@@ -857,7 +859,7 @@ async def get_business_analysis(
     """
     try:
         # Convert JSON data to DataFrame for analysis
-        df = request.data.to_df()
+        df = request.dataset.to_df()
 
         # Get first 1000 rows as CSV with quoted values for context
         df_csv = df.head(750).to_csv(index=False, quoting=1)
@@ -880,7 +882,7 @@ async def get_business_analysis(
             ),
         ]
 
-        completion: BusinessAnalysisGeneration = client.chat.completions.create(
+        completion: BusinessAnalysisGeneration = await client.chat.completions.create(
             response_model=BusinessAnalysisGeneration,
             model=ALTERNATIVE_LLM_BIG,
             temperature=0.1,
@@ -905,13 +907,13 @@ async def get_business_analysis(
         raise
 
 
-@reflect_code_generation_errors(max_attempts=3)
+@reflect_code_generation_errors(max_attempts=10)
 async def _run_analysis(
     request: RunAnalysisRequest,
     exception_history: list[InvalidGeneratedCode] | None = None,
 ) -> RunAnalysisResult:
     start_time = datetime.now()
-    if not request.data:
+    if not request.datasets:
         raise ValueError("Input data cannot be empty")
 
     if exception_history is None:
@@ -921,13 +923,8 @@ async def _run_analysis(
         request, next(iter(exception_history), None)
     )
     dataframes: dict[str, pd.DataFrame] = {}
-    for dataset in request.data:
-        if dataset.data:
-            df = dataset.to_df()
-            dataframes[dataset.name] = df
-        else:
-            dataframes[dataset.name] = pd.DataFrame()
-
+    for dataset in request.datasets:
+        dataframes[dataset.name] = dataset.to_df()
     try:
         result = execute_python(
             modules={
@@ -950,7 +947,7 @@ async def _run_analysis(
     return RunAnalysisResult(
         status="success",
         code=code,
-        data=result,
+        dataset=result,
         metadata=RunAnalysisResultMetadata(
             duration=duration.total_seconds(),
             attempts=len(exception_history) + 1,
@@ -965,16 +962,13 @@ async def _run_analysis(
     )
 
 
-async def run_analysis(
-    request: RunAnalysisRequest,
-) -> RunAnalysisResult:
+async def run_analysis(request: RunAnalysisRequest) -> RunAnalysisResult:
     """Execute analysis workflow on datasets."""
     try:
         return await _run_analysis(request)
     except MaxReflectionAttempts as e:
         return RunAnalysisResult(
-            status="failed",
-            suggestions="Consider reformulating the question or checking data quality",
+            status="error",
             metadata=RunAnalysisResultMetadata(
                 duration=e.duration,
                 attempts=len(e.exception_history) if e.exception_history else 0,
@@ -997,11 +991,11 @@ async def _generate_database_analysis_code(
     """
 
     # Convert dictionary data structure to list of columns for all tables
-    all_tables_info = [d.model_dump(mode="json") for d in request.dictionary]
+    all_tables_info = [d.model_dump(mode="json") for d in request.dictionaries]
 
     # Get sample data for all tables
     all_samples = []
-    for table in request.data:
+    for table in request.datasets:
         df = table.to_df()
         sample_str = f"Table: {table.name}\n{df.head(10).to_string()}"
         all_samples.append(sample_str)
@@ -1040,7 +1034,7 @@ async def _generate_database_analysis_code(
         )
 
     # Get response from OpenAI
-    completion = client.chat.completions.create(
+    completion = await client.chat.completions.create(
         response_model=DatabaseAnalysisCodeGeneration,
         model=ALTERNATIVE_LLM_BIG,
         temperature=0.1,
@@ -1054,43 +1048,51 @@ async def _generate_database_analysis_code(
 async def _run_database_analysis(
     request: RunDatabaseAnalysisRequest,
     exception_history: list[InvalidGeneratedCode] | None = None,
-) -> RunAnalysisResult:
-    if not request.data:
+) -> RunDatabaseAnalysisResult:
+    start_time = datetime.now()
+    if not request.datasets:
         raise ValueError("Input data cannot be empty")
 
     if exception_history is None:
         exception_history = []
+
     sql_code = await _generate_database_analysis_code(
         request, next(iter(exception_history), None)
     )
     try:
-        results, metadata = Database.execute_query(query=sql_code)
+        results = Database.execute_query(query=sql_code)
         results = cast(list[dict[str, Any]], results)
+        duration = datetime.now() - start_time
+
     except InvalidGeneratedCode:
         raise
     except Exception as e:
         raise InvalidGeneratedCode(code=sql_code, exception=e)
-    return RunAnalysisResult(
+    return RunDatabaseAnalysisResult(
         status="success",
         code=sql_code,
-        data=AnalystDataset(
+        dataset=AnalystDataset(
             data=results,
         ),
-        metadata=metadata,
+        metadata=RunDatabaseAnalysisResultMetadata(
+            duration=duration.total_seconds(),
+            attempts=len(exception_history),
+            datasets_analyzed=len(request.datasets),
+            total_columns_analyzed=sum(len(ds.columns) for ds in request.datasets),
+        ),
     )
 
 
 async def run_database_analysis(
     request: RunDatabaseAnalysisRequest,
-) -> RunAnalysisResult:
+) -> RunDatabaseAnalysisResult:
     """Execute analysis workflow on datasets."""
     try:
         return await _run_database_analysis(request)
     except MaxReflectionAttempts as e:
-        return RunAnalysisResult(
-            status="failed",
-            suggestions="Consider reformulating the question or checking data quality",
-            metadata=RunAnalysisResultMetadata(
+        return RunDatabaseAnalysisResult(
+            status="error",
+            metadata=RunDatabaseAnalysisResultMetadata(
                 duration=e.duration,
                 attempts=len(e.exception_history) if e.exception_history else 0,
             ),

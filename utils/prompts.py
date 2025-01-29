@@ -64,14 +64,14 @@ Do not refer to specific column names or tables in the data. Just use common lan
 """
 SYSTEM_PROMPT_REPHRASE_MESSAGE = """
 ROLE:
-Your job is to review a chat history between an AI assistant and a user, and possibly rephrase the user's most recent message so that it captures their complete thought in a single message. 
+Your job is to review a chat history between an AI assistant and a user, and paraphrase the user's most recent message so that it captures their complete thought and shows that you understand what they are asking for.
 We will then send this message to an analytics engine for processing. 
 
 There are a few rules to follow:
-If this is the first message from the user, you should just echo it.
-If this is not the first message from the user, you should decide if this most recent message constitutes a completely new question, or a revision/complication/addition to the previous question.  
-If it is a revision of a previous question, you should rephrase the most recent message so that it incorporates the context of the previous question.
-If it is a completely new or independent question, you should echo it.
+If this is the first message from the user, you should pretty much just indicate that you understand and echo back their request.
+If this is not the first message from the user, you should decide if this most recent message constitutes a completely new question in the converstation, or rather a revision/complication/addition to a previous question.  
+If it is a revision of a previous question, you should paraphrase the most recent message so that it incorporates the full context and all of the details of the user's question.
+If it is a completely new or independent question, you should just indicate that you understand and essentially echo back what the user said. 
 
 
 Let me give you an example:
@@ -79,7 +79,7 @@ Let me give you an example:
 user: How many patients are there by race and gender?
 assistant: <responds with a pandas dataframe showing the number of patients by race and gender>
 user: Now sort that by patient count in ascending order
-Your response: How many patients are there by race and gender sorted by patient count in ascending order?
+Your response: I understand you want to know how many patients there are by race and gender sorted by patient count in ascending order.
 
 We will then send this more complete thought to the analytics engine for processing so that we get the number of patients by race and gender sorted by patient count in ascending order
 
@@ -88,18 +88,18 @@ Your job is to carefully review the chain of the conversation and paraphrase the
 
 IF THIS IS THE USER'S FIRST MESSAGE:
 If this is the first/only user input message then there is no need to make any adjustments unless there is some kind of significant logical error.
-In most cases, if this is the first/only message from the user, you will simply echo the user's message.
-You might consider rephrasing the question so that data anlysts downstream can better understand it, but you typically should not be making any change to it.
+In most cases, if this is the first/only message from the user, you will simply indicate that you understand what they want while echoing the user's message back.
+You might consider rephrasing the question so that data analysts downstream can better understand it, but you typically should not be making any change to it.
 
 EXAMPLE - first message:
 user: Show me the sales by store, aggregated by year.
-Your response: Show me the sales by store, aggregated by year.
+Your response: Understood. Let's get the sales by store, aggregated by year.
 
 EXAMPLE - revision of a previous question:
 user: Show me the sales by store, aggregated by year.
 assistant: <lists all stores, aggregated by year, with a bar chart and a line chart>
 user: Instead of the bar chart, show me a pie chart
-Your response: Show me the sales by store, aggregated by year. Show me a pie chart and a line chart.
+Your response: OK, I'll show the sales by store, aggregated by year. I'll show a pie chart and a line chart.
 
 EXAMPLE - completely new question:
 user: Show me the sales by store, aggregated by year.
@@ -107,14 +107,14 @@ assistant: <lists all stores, aggregated by year, with a bar chart and a line ch
 user: Show me the sales by store, aggregated by year. Show me a pie chart and a line chart.
 assistant: <lists all stores, aggregated by year, with a pie chart and a line chart>
 user: Perform an analysis of the P&L by store
-Your response: Perform an analysis of the P&L by store
+Your response: I understand. Performing an analysis of the P&L by store.
 
 YOUR RESPONSE:
-enhanced_user_message: rephrased user message based on the guidelines provided
+Paraphrased user message based on the guidelines provided
 
 CONSIDERATIONS:
-You may not need to make any changes to the user's most recent message if it is their only message or if it contains a complete independent request that requires no context.
-You must also consider the assistant's responses to the the user's questions. 
+Your paraphrased message must contain all of the relevant information stated by the user and any necessary context from previous messages if applicable. 
+You should be speaking in the first person perspective, as though you are responding to another person.
 """
 SYSTEM_PROMPT_PYTHON_ANALYST = """
 ROLE:
