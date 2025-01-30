@@ -114,6 +114,7 @@ class GlobalLLM:
     AZURE_OPENAI_GPT_4_O_MINI = LLMConfig(
         name="azure-openai-gpt-4-o-mini", credential_type="azure"
     )
+
     # AWS Models
     AMAZON_TITAN = LLMConfig(name="amazon-titan", credential_type="aws")
     ANTHROPIC_CLAUDE_2 = LLMConfig(name="anthropic-claude-2", credential_type="aws")
@@ -126,6 +127,7 @@ class GlobalLLM:
     ANTHROPIC_CLAUDE_3_OPUS = LLMConfig(
         name="anthropic-claude-3-opus", credential_type="aws"
     )
+
     # Google Models
     GOOGLE_BISON = LLMConfig(name="google-bison", credential_type="google")
     GOOGLE_GEMINI_1_5_FLASH = LLMConfig(
@@ -149,13 +151,6 @@ class GlobalPredictionEnvironmentPlatforms(str, Enum):
     OTHER = "other"
     SNOWFLAKE = "snowflake"
     SAP_AI_CORE = "sapAiCore"
-
-
-class GlobalRegisteredModelName(str, Enum):
-    TOXICITY = "[Hugging Face] Toxicity Classifier"
-    SENTIMENT = "[Hugging Face] Sentiment Classifier"
-    REFUSAL = "[DataRobot] LLM Refusal Score"
-    PROMPT_INJECTION = "[Hugging Face] Prompt Injection Classifier"
 
 
 class GlobalGuardrailTemplateName(str, Enum):

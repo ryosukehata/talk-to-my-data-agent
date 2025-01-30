@@ -41,7 +41,9 @@ from utils.resources import (
     app_env_name,
     llm_deployment_env_name,
 )
-from utils.schema import AppInfra
+from utils.schema import (
+    AppInfra,
+)
 
 check_feature_flags(
     pathlib.Path(PROJECT_ROOT / "infra" / "feature_flag_requirements.yaml")

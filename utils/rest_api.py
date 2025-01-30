@@ -42,10 +42,10 @@ from utils.schema import (
     ChatRequest,
     CleansedDataset,
     DataDictionary,
+    GetBusinessAnalysisRequest,
+    GetBusinessAnalysisResult,
     RunAnalysisRequest,
     RunAnalysisResult,
-    RunBusinessAnalysisRequest,
-    RunBusinessAnalysisResult,
     RunChartsRequest,
     RunChartsResult,
     RunDatabaseAnalysisRequest,
@@ -162,8 +162,8 @@ async def run_charts_endpoint(request: RunChartsRequest) -> RunChartsResult:
 
 @app.post("/get_business_analysis")
 async def get_business_analysis_endpoint(
-    request: RunBusinessAnalysisRequest,
-) -> RunBusinessAnalysisResult:
+    request: GetBusinessAnalysisRequest,
+) -> GetBusinessAnalysisResult:
     return await get_business_analysis(request)
 
 

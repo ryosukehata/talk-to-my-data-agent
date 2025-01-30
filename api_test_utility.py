@@ -42,8 +42,8 @@ from utils.rest_api import (  # type: ignore[attr-defined]
 from utils.schema import (
     AnalystDataset,
     ChatRequest,
+    GetBusinessAnalysisRequest,
     RunAnalysisRequest,
-    RunBusinessAnalysisRequest,
     RunChartsRequest,
 )
 
@@ -734,7 +734,7 @@ async def main() -> None:
                     if "data" in analysis_result and isinstance(
                         analysis_result["data"], list
                     ):
-                        business_request = RunBusinessAnalysisRequest(
+                        business_request = GetBusinessAnalysisRequest(
                             dataset=analysis_result["data"],
                             dictionary=[
                                 {

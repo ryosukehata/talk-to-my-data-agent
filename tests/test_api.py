@@ -23,10 +23,10 @@ from utils.schema import (
     CleansedDataset,
     DataDictionary,
     DataDictionaryColumn,
+    GetBusinessAnalysisRequest,
+    GetBusinessAnalysisResult,
     RunAnalysisRequest,
     RunAnalysisResult,
-    RunBusinessAnalysisRequest,
-    RunBusinessAnalysisResult,
     RunChartsRequest,
     RunChartsResult,
 )
@@ -93,9 +93,9 @@ def run_charts_result_canned() -> RunChartsResult:
 
 
 @pytest.fixture
-def run_business_result_canned() -> RunBusinessAnalysisResult:
+def run_business_result_canned() -> GetBusinessAnalysisResult:
     with open("tests/models/run_business_result.json") as f:
-        return RunBusinessAnalysisResult.model_validate_json(f.read())
+        return GetBusinessAnalysisResult.model_validate_json(f.read())
 
 
 @pytest.fixture
@@ -113,9 +113,9 @@ def chart_request(
 @pytest.fixture
 def business_request(
     pulumi_up: Any, run_analysis_result_canned: RunAnalysisResult, question: str
-) -> RunBusinessAnalysisRequest:
+) -> GetBusinessAnalysisRequest:
     assert run_analysis_result_canned.dataset is not None
-    business_request = RunBusinessAnalysisRequest(
+    business_request = GetBusinessAnalysisRequest(
         dataset=run_analysis_result_canned.dataset,
         dictionary=DataDictionary(
             name="analysis_result",
@@ -171,7 +171,7 @@ async def test_run_charts_analysis(
 @pytest.mark.asyncio
 async def test_run_business_analysis(
     pulumi_up: Any,
-    business_request: RunBusinessAnalysisRequest,
+    business_request: GetBusinessAnalysisRequest,
 ) -> None:
     from utils.api import (
         get_business_analysis,

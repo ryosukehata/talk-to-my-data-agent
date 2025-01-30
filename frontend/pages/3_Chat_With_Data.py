@@ -42,14 +42,15 @@ from utils.api import (
     run_database_analysis,
 )
 from utils.schema import (
+    AnalysisError,
     AnalystChatMessage,
     ChatRequest,
     DataDictionary,
     EnhancedQuestionGeneration,
+    GetBusinessAnalysisRequest,
+    GetBusinessAnalysisResult,
     RunAnalysisRequest,
     RunAnalysisResult,
-    RunBusinessAnalysisRequest,
-    RunBusinessAnalysisResult,
     RunChartsRequest,
     RunChartsResult,
     RunDatabaseAnalysisRequest,
@@ -74,6 +75,8 @@ if "initialized" not in st.session_state:
     st.session_state.debug_mode = True
     st.session_state.data_source = None
     st.session_state.file_uploader_key = 0
+    st.session_state.processed_file_ids = []
+
 elif "chat_messages" not in st.session_state:
     st.session_state.chat_messages = []
 elif "chat_input_key" not in st.session_state:
@@ -180,6 +183,7 @@ class UnifiedRenderer:
             analysis_result = None
             charts_result = None
             business_result = None
+            exception = None
 
             for component in message.components:
                 if isinstance(component, EnhancedQuestionGeneration):
@@ -190,8 +194,10 @@ class UnifiedRenderer:
                     analysis_result = component
                 elif isinstance(component, RunChartsResult):
                     charts_result = component
-                elif isinstance(component, RunBusinessAnalysisResult):
+                elif isinstance(component, GetBusinessAnalysisResult):
                     business_result = component
+                elif isinstance(component, AnalysisError):
+                    exception = component
 
             # Render components in order
             if enhanced_q:
@@ -209,10 +215,18 @@ class UnifiedRenderer:
 
             if business_result:
                 self.render_business_results(business_result)
+            if exception:
+                self.render_exception(exception)
 
-    def render_analysis_results(self, result: Any, is_database: bool) -> None:
+    def render_analysis_results(
+        self, result: RunAnalysisResult | RunDatabaseAnalysisResult, is_database: bool
+    ) -> None:
         """Render analysis results and code"""
+
         with self.containers.analysis:
+            if result.status == "error":
+                self.render_exception(result.metadata.exception)
+                return
             if result.code:
                 with st.expander("Analysis Code", expanded=False):
                     language = "sql" if is_database else "python"
@@ -224,13 +238,23 @@ class UnifiedRenderer:
     def render_charts(self, result: RunChartsResult) -> None:
         """Render charts"""
         with self.containers.charts:
+            if result.status == "error":
+                self.render_exception(result.metadata.exception)
             if result.fig1:
                 st.plotly_chart(result.fig1, use_container_width=True)
             if result.fig2:
                 st.plotly_chart(result.fig2, use_container_width=True)
 
-    def render_business_results(self, result: RunBusinessAnalysisResult) -> None:
+    def render_business_results(self, result: GetBusinessAnalysisResult) -> None:
         """Render business analysis results"""
+        if result.status == "error":
+            with self.containers.bottom_line:
+                if result.metadata is not None and result.metadata.exception_str:
+                    st.error(
+                        f"Error running business analysis\n{result.metadata.exception_str}"
+                    )
+                else:
+                    st.error("Error running business analysis")
         with self.containers.bottom_line:
             with st.expander("Bottom Line", expanded=True):
                 st.markdown((result.bottom_line or "").replace("$", r"\$"))
@@ -245,6 +269,20 @@ class UnifiedRenderer:
                 with st.expander("Follow-up Questions", expanded=True):
                     for q in result.follow_up_questions:
                         st.markdown(f"- {q}".replace("$", r"\$"))
+
+    def render_exception(self, exception: AnalysisError | None) -> None:
+        if (
+            exception is None
+            or exception.exception_history is None
+            or len(exception.exception_history) == 0
+        ):
+            st.error("An error occurred during analysis. Please retry")
+            return
+        last_exception = exception.exception_history[-1]
+        st.error(f"Error: {last_exception.exception_str}")
+        if last_exception.code is not None:
+            with st.expander("Last Executed Code"):
+                st.code(last_exception.code)
 
 
 # Usage for historical messages
@@ -326,6 +364,13 @@ async def run_complete_analysis(
                             f"Error running initial analysis. Try rephrasing: {str(e)}"
                         )
                         return
+                    # if analysis_result.status == "error":
+                    #     error_context.update({"component": "analysis"})
+                    #     log_error_details(
+                    #         analysis_result.metadata.exception, error_context
+                    #     )
+                    #     renderer.render_exception(analysis_result.metadata.exception)
+                    #     return
                 # Run concurrent analyses if we have initial results
                 if analysis_result and analysis_result.dataset:
                     with st.spinner("Generating Insights..."):
@@ -336,7 +381,7 @@ async def run_complete_analysis(
                                 question=enhanced_message,
                             )
 
-                            business_request = RunBusinessAnalysisRequest(
+                            business_request = GetBusinessAnalysisRequest(
                                 dataset=analysis_result.dataset,
                                 dictionary=DataDictionary.from_df(
                                     analysis_result.dataset.to_df()
@@ -439,7 +484,7 @@ async def main() -> None:
             valid_messages: list[ChatCompletionMessageParam] = [
                 msg.to_openai_message_param()
                 for msg in st.session_state.chat_messages
-                if msg.role in ["user", "assistant", "system"] and msg.content.strip()
+                if msg.content.strip()
             ]
             valid_messages.append(
                 ChatCompletionUserMessageParam(role="user", content=question)

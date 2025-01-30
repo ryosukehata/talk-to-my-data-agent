@@ -141,7 +141,7 @@ def download_file(browser, url, timeout=60) -> Path:
 
 def wait_for_download(file_path, timeout=60) -> bool:
     start_time = time.time()
-    if not file_path.is_file():
+    while not file_path.is_file():
         if time.time() - start_time > timeout:
             raise TimeoutError(f"Download timeout: {file_path}")
         time.sleep(1)

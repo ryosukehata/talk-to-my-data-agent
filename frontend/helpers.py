@@ -108,18 +108,16 @@ def log_api_call(
                 k: v.dict() if hasattr(v, "dict") else v for k, v in kwargs.items()
             }
 
-            input_log = f"""
-INPUT PARAMETERS [{request_id}]
-------------------------
-Function: {func.__name__}
-Timestamp: {datetime.now().isoformat()}
-
-Arguments:
-{format_json(formatted_args)}
-
-Keyword Arguments:
-{format_json(formatted_kwargs)}
-"""
+            input_log = (
+                f"INPUT PARAMETERS [{request_id}]\n"
+                "------------------------\n"
+                f"Function: {func.__name__}\n"
+                f"Timestamp: {datetime.now().isoformat()}\n\n"
+                "Arguments:\n"
+                f"{format_json(formatted_args)}\n\n"
+                "Keyword Arguments:\n"
+                f"{format_json(formatted_kwargs)}\n"
+            )
             logger.debug(input_log)
 
             start_time = time.time()
@@ -135,21 +133,17 @@ Keyword Arguments:
                     "json_data": request_options.get("json_data", {}),
                 }
                 logger.debug(
-                    f"""
-Request options:
-{json.dumps(formatted_options, indent=2, ensure_ascii=False)}
-"""
+                    f"Request options:\n{json.dumps(formatted_options, indent=2, ensure_ascii=False)}\n"
                 )
 
-            output_log = f"""
-OUTPUT RESULTS [{request_id}]
-------------------------
-Function: {func.__name__}
-Execution Time: {execution_time:.2f} seconds
-
-Response:
-{format_json(result)}
-"""
+            output_log = (
+                f"OUTPUT RESULTS [{request_id}]\n"
+                "------------------------\n"
+                f"Function: {func.__name__}\n"
+                f"Execution Time: {execution_time:.2f} seconds\n\n"
+                "Response:\n"
+                f"{format_json(result)}\n"
+            )
             logger.debug(output_log)
 
             logger.info(
@@ -158,15 +152,14 @@ Response:
             return result
 
         except Exception as e:
-            error_log = f"""
-ERROR IN API CALL [{request_id}]
-------------------------
-Function: {func.__name__}
-Error Type: {type(e).__name__}
-Error Message: {str(e)}
-
-Stack Trace:
-"""
+            error_log = (
+                f"ERROR IN API CALL [{request_id}]\n"
+                "------------------------\n"
+                f"Function: {func.__name__}\n"
+                f"Error Type: {type(e).__name__}\n"
+                f"Error Message: {str(e)}\n\n"
+                "Stack Trace:\n"
+            )
             logger.error(error_log, exc_info=True)
             raise
 

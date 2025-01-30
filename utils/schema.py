@@ -37,6 +37,8 @@ from pydantic import (
     field_validator,
 )
 
+from utils.code_execution import MaxReflectionAttempts
+
 
 class LLMDeploymentSettings(BaseModel):
     target_feature_name: str = "resultText"
@@ -216,6 +218,7 @@ class RunAnalysisResultMetadata(BaseModel):
     datasets_analyzed: int | None = None
     total_rows_analyzed: int | None = None
     total_columns_analyzed: int | None = None
+    exception: AnalysisError | None = None
 
 
 class RunAnalysisResult(BaseModel):
@@ -225,11 +228,45 @@ class RunAnalysisResult(BaseModel):
     code: str | None = None
 
 
+class CodeExecutionError(BaseModel):
+    code: str | None = None
+    exception_str: str | None = None
+    stdout: str | None = None
+    stderr: str | None = None
+    traceback_str: str | None = None
+
+
+class AnalysisError(BaseModel):
+    exception_history: list[CodeExecutionError] | None = None
+
+    @classmethod
+    def from_max_reflection_exception(
+        cls,
+        exception: MaxReflectionAttempts,
+    ) -> "AnalysisError":
+        return AnalysisError(
+            exception_history=[
+                CodeExecutionError(
+                    exception_str=str(exception.exception),
+                    traceback_str=exception.traceback_str,
+                    code=exception.code,
+                    stdout=exception.stdout,
+                    stderr=exception.stderr,
+                )
+                for exception in exception.exception_history
+                if exception is not None
+            ]
+            if exception.exception_history is not None
+            else None,
+        )
+
+
 class RunDatabaseAnalysisResultMetadata(BaseModel):
     duration: float
     attempts: int
     datasets_analyzed: int | None = None
     total_columns_analyzed: int | None = None
+    exception: AnalysisError | None = None
 
 
 class RunDatabaseAnalysisResult(BaseModel):
@@ -267,11 +304,12 @@ class RunChartsResult(BaseModel):
         return go.Figure(json.loads(self.fig2_json)) if self.fig2_json else None
 
 
-class RunBusinessAnalysisMetadata(BaseModel):
-    timestamp: str
-    question: str
-    rows_analyzed: int
-    columns_analyzed: int
+class GetBusinessAnalysisMetadata(BaseModel):
+    duration: float | None = None
+    question: str | None = None
+    rows_analyzed: int | None = None
+    columns_analyzed: int | None = None
+    exception_str: str | None = None
 
 
 class BusinessAnalysisGeneration(BaseModel):
@@ -280,14 +318,15 @@ class BusinessAnalysisGeneration(BaseModel):
     follow_up_questions: list[str]
 
 
-class RunBusinessAnalysisResult(BaseModel):
+class GetBusinessAnalysisResult(BaseModel):
+    status: Literal["success", "error"]
     bottom_line: str
     additional_insights: str
     follow_up_questions: list[str]
-    metadata: RunBusinessAnalysisMetadata
+    metadata: GetBusinessAnalysisMetadata | None = None
 
 
-class RunBusinessAnalysisRequest(BaseModel):
+class GetBusinessAnalysisRequest(BaseModel):
     dataset: AnalystDataset
     dictionary: DataDictionary
     question: str
@@ -335,18 +374,27 @@ class CodeGeneration(BaseModel):
     description: str
 
 
+RuntimeCredentialType = Literal["llm", "db"]
+
+
+DatabaseConnectionType = Literal["bigquery", "snowflake", "no_database"]
+
+
 class AppInfra(BaseModel):
     llm: str
-    database: Literal["bigquery", "snowflake", "no_database"]
+    database: DatabaseConnectionType
+
+
+UserRoleType = Literal["assistant", "user", "system"]
 
 
 class AnalystChatMessage(BaseModel):
-    role: Literal["assistant", "user", "system"]
+    role: UserRoleType
     content: str
     components: list[
         RunAnalysisResult
         | RunChartsResult
-        | RunBusinessAnalysisResult
+        | GetBusinessAnalysisResult
         | EnhancedQuestionGeneration
         | RunDatabaseAnalysisResult
     ]

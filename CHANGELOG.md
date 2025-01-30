@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.1.3] - 2025-01-30
+
+### Added
+- Errors are displayed consistently in the app
+- Invalid generated code is displayed on error
+
+### Changed
+- Additional modules provided to the code execution function
+- Improved date parsing
+- Default to GPT 4o mini to be compatible with the trial
+
 ## [0.1.2] - 2025-01-29
 
 ### Changed

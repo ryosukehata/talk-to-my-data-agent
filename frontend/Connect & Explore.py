@@ -148,7 +148,7 @@ async def process_data_and_update_state(datasets: list[AnalystDataset]) -> None:
 
     # Process the new data
     logger.info("Starting data processing")
-    if st.session_state.data_source != "database":
+    if st.session_state.data_source != DataSource.DATABASE:
         try:
             cleansed_datasets = await cleanse_dataframes(datasets)
         except Exception as e:

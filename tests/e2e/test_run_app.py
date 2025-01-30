@@ -23,6 +23,8 @@ from tests.e2e.utils import (
     wait_for_element_to_be_visible,
 )
 
+PROCESSING_TIMEOUT = 120
+
 
 def assert_data_processed(browser) -> None:
     assert wait_for_element_to_be_visible(
@@ -72,6 +74,14 @@ def load_from_database(browser: webdriver.Chrome, dataset: str) -> None:
     assert_data_processed(browser)
 
 
+def load_from_file(browser, file_url) -> None:
+    dataset = download_file(browser, file_url)
+    file_input = find_element(
+        browser, By.CSS_SELECTOR, 'input[data-testid="stFileUploaderDropzoneInput"]'
+    )
+    file_input.send_keys(str(dataset))
+
+
 @pytest.mark.usefixtures("check_if_logged_in")
 def test_app_loaded(browser: webdriver.Chrome, get_app_url: str) -> None:
     browser.get(get_app_url)
@@ -79,17 +89,23 @@ def test_app_loaded(browser: webdriver.Chrome, get_app_url: str) -> None:
         browser,
         By.XPATH,
         "//p[contains(text(), 'Upload and process your data using the sidebar to get started')]",
-        60,
+        PROCESSING_TIMEOUT,
     )
 
 
 @pytest.mark.usefixtures("check_if_logged_in")
-def test_load_from_database(browser: webdriver.Chrome, get_app_url: str) -> None:
+def test_cleaning_report(browser: webdriver.Chrome, get_app_url: str) -> None:
     browser.get(get_app_url)
-    load_from_database(browser, "LENDING_CLUB_PROFILE")
+    load_from_file(
+        browser,
+        "https://s3.amazonaws.com/datarobot_public_datasets/drx/Lending+Club+Transactions.csv",
+    )
 
     assert wait_for_element_to_be_visible(
-        browser, By.XPATH, "//p[contains(text(), 'View Cleaning Report')]", 60
+        browser,
+        By.XPATH,
+        "//p[contains(text(), 'View Cleaning Report')]",
+        PROCESSING_TIMEOUT,
     )
 
 
@@ -124,22 +140,6 @@ def test_chat_page_loaded(browser: webdriver.Chrome, get_app_url: str) -> None:
         browser, By.CSS_SELECTOR, 'textarea[data-testid="stChatInputTextArea"]'
     )
 
-
-@pytest.mark.usefixtures("check_if_logged_in")
-def test_file_upload(browser: webdriver.Chrome, get_app_url: str) -> None:
-    ten_k_diabetes_20 = download_file(
-        browser,
-        "https://s3.amazonaws.com/datarobot_public_datasets/10k_diabetes_20.csv",
-    )
-    browser.get(get_app_url)
-
-    file_input = find_element(
-        browser, By.CSS_SELECTOR, 'input[data-testid="stFileUploaderDropzoneInput"]'
-    )
-    file_input.send_keys(str(ten_k_diabetes_20))
-
-    assert_data_processed(browser)
-
     click_element(
         browser,
         By.XPATH,
@@ -167,21 +167,30 @@ def test_file_upload(browser: webdriver.Chrome, get_app_url: str) -> None:
     )
 
     assert wait_for_element_to_be_visible(
-        browser, By.XPATH, "//p[contains(text(), 'Bottom Line')]", 60
+        browser, By.XPATH, "//p[contains(text(), 'Bottom Line')]", PROCESSING_TIMEOUT
     )
 
     assert wait_for_element_to_be_visible(
-        browser, By.XPATH, "//p[contains(text(), 'Analysis Code')]", 60
+        browser, By.XPATH, "//p[contains(text(), 'Analysis Code')]", PROCESSING_TIMEOUT
     )
 
     assert wait_for_element_to_be_visible(
-        browser, By.XPATH, "//p[contains(text(), 'Analysis Results')]", 60
+        browser,
+        By.XPATH,
+        "//p[contains(text(), 'Analysis Results')]",
+        PROCESSING_TIMEOUT,
     )
 
     assert wait_for_element_to_be_visible(
-        browser, By.XPATH, "//p[contains(text(), 'Additional Insights')]", 60
+        browser,
+        By.XPATH,
+        "//p[contains(text(), 'Additional Insights')]",
+        PROCESSING_TIMEOUT,
     )
 
     assert wait_for_element_to_be_visible(
-        browser, By.XPATH, "//p[contains(text(), 'Follow-up Questions')]", 60
+        browser,
+        By.XPATH,
+        "//p[contains(text(), 'Follow-up Questions')]",
+        PROCESSING_TIMEOUT,
     )

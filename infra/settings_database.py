@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Literal
 
-DATABASE_CONNECTION_TYPE: Literal["bigquery", "snowflake", "no_database"] = "snowflake"
+from utils.schema import DatabaseConnectionType
+
+DATABASE_CONNECTION_TYPE: DatabaseConnectionType = "snowflake"

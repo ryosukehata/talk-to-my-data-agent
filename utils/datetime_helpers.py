@@ -66,7 +66,15 @@ def convert_datetime_series(series: pd.Series[Any]) -> pd.Series[Any]:
     """
     try:
         # Convert to datetime
-        result = pd.to_datetime(series, errors="coerce")
+        candidate1 = pd.to_datetime(series, errors="coerce")
+        candidate2 = pd.to_datetime(series, errors="coerce", dayfirst=True)
+
+        # Choose the candidate with the most non-null values
+        result = (
+            candidate1
+            if candidate1.notnull().sum() > candidate2.notnull().sum()
+            else candidate2
+        )
         # Convert to ISO format strings
         return result.dt.strftime("%Y-%m-%dT%H:%M:%S")
     except Exception as e:

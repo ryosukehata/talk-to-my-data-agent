@@ -18,14 +18,17 @@ and govern the components.
 3. [Why build AI Apps with DataRobot app templates?](#why-build-ai-apps-with-datarobot-app-templates)
 4. [Data privacy](#data-privacy)
 5. [Make changes](#make-changes)
-    - [Snowflake connection](#snowflake-connection)
+   - [Change the LLM](#change-the-llm)
+   - [Change the database](#change-the-database)
+      * [No database](#no-database)
+      * [BigQuery](#bigquery)
 6. [Share results](#share-results)
 7. [Delete all provisioned resources](#delete-all-provisioned-resources)
 8. [Setup for advanced users](#setup-for-advanced-users)
 
 ## Setup
 
-Before proceeding, ensure you have access to the required credentials and services. This template is pre-configured to use an Azure OpenAI endpoint and Snowflake Database credentials. To run the template as-is, you will need access to Azure OpenAI (leverages `gpt-4o` by default). 
+Before proceeding, ensure you have access to the required credentials and services. This template is pre-configured to use an Azure OpenAI endpoint and Snowflake Database credentials. To run the template as-is, you will need access to Azure OpenAI (leverages `gpt-4o-mini` by default). 
 
 Codespace users can **skip steps 1 and 2**. For local development, follow all of the following steps.
 
@@ -70,31 +73,7 @@ and `pulumi` invocation see [here](#setup-for-advanced-users).
 
 ## Architecture overview
 
-```mermaid
-flowchart TD
-   subgraph DataSource["Data Sources"]
-        File("File upload")
-        AICatalog("AI Catalog")
-        Snowflake("Snowflake")
-        Bigquery("Bigquery")
-   end
-
-   Frontend("Streamlit </br> Frontend")
-   Deployment("Bolt On Governance </br> MLOps Deployment")
-   LLM("LLM")
-   Dictionaries("Data Dictionaries")
-   DataAnalysis("Code Generation and Execution")
-   Insights("Business Analysis Insights")
-   Charts("Chart Generation")
-
-   LLM -.-> Deployment
-   Deployment --> Frontend
-
-   Frontend --> Dictionaries
-   Frontend --> DataAnalysis
-   Frontend --> Insights
-   Frontend --> Charts
-```
+![image](https://github.com/user-attachments/assets/2ca66231-9321-48fe-abdb-f2d35687dff6)
 
 
 App templates contain three families of complementary logic:
@@ -131,7 +110,8 @@ Your data privacy is important to us. Data handling is governed by the DataRobot
 
 ### Change the LLM
 
-1. Modify the `LLM` setting in `infra/settings_generative.py` by changing `LLM=GlobalLLM.AZURE_OPENAI_GPT_4_O` to any other LLM from the `GlobalLLM` object.
+1. Modify the `LLM` setting in `infra/settings_generative.py` by changing `LLM=GlobalLLM.AZURE_OPENAI_GPT_4_O_MINI` to any other LLM from the `GlobalLLM` object. 
+     - Trial users: since the list of supported LLMs is limited, use the `OPENAI_API_DEPLOYMENT_ID` in `.env` to override which model is used in your azure organisation. You'll still see GPT 4o-mini in the playground, but the deployed app will use the provided azure deployment.  
 2. Provide the required credentials in `.env` dependent on your choice.
 3. Run `pulumi up` to update your stack (Or rerun your quickstart).
       ```bash
@@ -141,11 +121,17 @@ Your data privacy is important to us. Data handling is governed by the DataRobot
 
 ### Change the database
 
+#### No database
+
+To remove the database connection completely:
+
+1. Modify the `DATABASE_CONNECTION_TYPE` setting in `infra/settings_database.py` by changing `DATABASE_CONNECTION_TYPE="snowflake"` to `DATABASE_CONNECTION_TYPE="no_database"`.
+ 
 #### BigQuery
 
 The Talk to my Data Agent supports connecting to BigQuery.
 1. Modify the `DATABASE_CONNECTION_TYPE` setting in `infra/settings_database.py` by changing `DATABASE_CONNECTION_TYPE=snowflake` to `DATABASE_CONNECTION_TYPE=bigquery`. 
-2. Provide the required google credentials in `.env` dependent on your choice.  Ensure that GOOGLE_DB_SCHEMA is also populated `.env`.
+2. Provide the required google credentials in `.env` dependent on your choice.  Ensure that GOOGLE_DB_SCHEMA is also populated in `.env`.
 3. Run `pulumi up` to update your stack (Or rerun your quickstart).
       ```bash
       source set_env.sh  # On windows use `set_env.bat`
