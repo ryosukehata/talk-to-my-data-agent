@@ -30,7 +30,7 @@ from .common.schema import (
 )
 from .common.stack import project_name
 
-LLM = GlobalLLM.AZURE_OPENAI_GPT_4_O_MINI
+LLM = GlobalLLM.AZURE_OPENAI_GPT_4_O
 
 custom_model_args = CustomModelArgs(
     resource_name=f"Generative Analyst Custom Model [{project_name}]",

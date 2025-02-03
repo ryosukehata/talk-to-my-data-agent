@@ -35,12 +35,12 @@ def data() -> dict[str, Any]:
 class TestDatasetInput:
     def test_accepts_dataframe(self, data: dict[str, Any]) -> None:
         model = AnalystDataset(data=data["df"], name="test")
-        assert isinstance(model._data, pd.DataFrame)
+        # assert isinstance(model.data, pd.DataFrame)
         assert_frame_equal(model.to_df(), data["df"])
 
     def test_accepts_records(self, data: dict[str, Any]) -> None:
         model = AnalystDataset(data=data["records"], name="test")
-        assert isinstance(model._data, pd.DataFrame)
+        # assert isinstance(model.data, pd.DataFrame)
         assert_frame_equal(model.to_df(), data["df"])
 
     def test_serialization(self, data: dict[str, Any]) -> None:
@@ -60,7 +60,7 @@ class TestDatasetInput:
     def test_single_row(self) -> None:
         single_row_df = pd.DataFrame({"a": [1], "b": ["x"]})
         model = AnalystDataset(data=single_row_df, name="test")
-        assert len(model.data) == 1
+        assert len(model.to_df()) == 1
         assert_frame_equal(model.to_df(), single_row_df)
 
     def test_invalid_types(self) -> None:

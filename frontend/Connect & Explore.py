@@ -17,6 +17,7 @@ import logging
 import os
 import sys
 import warnings
+from collections import defaultdict
 from typing import Any, cast
 
 import pandas as pd
@@ -43,8 +44,8 @@ from utils.api import (
 from utils.database_helpers import Database, app_infra
 from utils.schema import (
     AnalystDataset,
+    CleansedColumnReport,
     CleansedDataset,
-    CleansingReport,
 )
 
 warnings.filterwarnings("ignore")
@@ -148,17 +149,15 @@ async def process_data_and_update_state(datasets: list[AnalystDataset]) -> None:
 
     # Process the new data
     logger.info("Starting data processing")
+    analysis_datasets = datasets
     if st.session_state.data_source != DataSource.DATABASE:
         try:
             cleansed_datasets = await cleanse_dataframes(datasets)
+            st.session_state.cleansed_data.extend(cleansed_datasets)
+            analysis_datasets = [ds.dataset for ds in cleansed_datasets]
         except Exception as e:
             logger.error("Data processing failed")
             st.error(f"❌ Error processing data: {str(e)}")
-            cleansed_datasets = []
-        analysis_datasets = [ds.dataset for ds in cleansed_datasets]
-        st.session_state.cleansed_data += cleansed_datasets
-    else:
-        analysis_datasets = datasets
 
     st.session_state.datasets.extend(analysis_datasets)
     logger.info("Data processing successful, generating dictionaries")
@@ -351,7 +350,7 @@ async def main() -> None:
         )
         for ds_display in st.session_state.datasets:
             st.subheader(f"{ds_display.name}")
-            cleaning_report: CleansingReport | None = None
+            cleaning_report: list[CleansedColumnReport] | None = None
             try:
                 cleaning_report = next(
                     clean_ds.cleaning_report
@@ -361,22 +360,57 @@ async def main() -> None:
 
                 # Display cleaning report in expander
                 with st.expander("View Cleaning Report"):
-                    report = cleaning_report
-                    if report.columns_cleaned:
-                        st.write("**Columns Cleaned:**")
-                        st.write(", ".join(report.columns_cleaned))
+                    # Group reports by conversion type
+                    conversions: defaultdict[str, list[CleansedColumnReport]] = (
+                        defaultdict(list)
+                    )
 
-                        if report.warnings:
-                            st.write("**Warnings:**")
-                            for warning in report.warnings:
-                                st.write(f"- {warning}")
+                    for col_report in cleaning_report:
+                        if col_report.conversion_type:
+                            conversions[col_report.conversion_type].append(col_report)
 
-                        if report.errors:
-                            st.error("**Errors:**")
-                            for error in report.errors:
-                                st.write(f"- {error}")
+                    # Display summary of changes
+                    if conversions:
+                        st.write("### Summary of Changes")
+                        for conv_type, reports in conversions.items():
+                            columns_count = len(reports)
+                            st.write(
+                                f"**{conv_type}** ({columns_count} {'column' if columns_count == 1 else 'columns'})"
+                            )
+                            for report in reports:
+                                with st.container():
+                                    st.markdown(f"### {report.new_column_name}")
+                                    if report.original_column_name:
+                                        st.write(
+                                            f"Original name: `{report.original_column_name}`"
+                                        )
+                                    if report.original_dtype:
+                                        st.write(
+                                            f"Type conversion: `{report.original_dtype}` → `{report.new_dtype}`"
+                                        )
+
+                                    # Show warnings if any
+                                    if report.warnings:
+                                        st.write("**Warnings:**")
+                                        for warning in report.warnings:
+                                            st.markdown(f"- {warning}")
+
+                                    # Show errors if any
+                                    if report.errors:
+                                        st.error("**Errors:**")
+                                        for error in report.errors:
+                                            st.markdown(f"- {error}")
+                    else:
+                        st.info("No columns were modified during cleaning")
+
+                    # Show unchanged columns
+                    unchanged = [r for r in cleaning_report if not r.conversion_type]
+                    if unchanged:
+                        st.write("### Unchanged Columns")
+                        st.write(", ".join(f"`{r.new_column_name}`" for r in unchanged))
+
             except StopIteration:
-                pass
+                st.warning("No cleaning report available for this dataset")
 
             # Display dataframe with column filters
             df_display = ds_display.to_df()

@@ -28,7 +28,7 @@ and govern the components.
 
 ## Setup
 
-Before proceeding, ensure you have access to the required credentials and services. This template is pre-configured to use an Azure OpenAI endpoint and Snowflake Database credentials. To run the template as-is, you will need access to Azure OpenAI (leverages `gpt-4o-mini` by default). 
+Before proceeding, ensure you have access to the required credentials and services. This template is pre-configured to use an Azure OpenAI endpoint and Snowflake Database credentials. To run the template as-is, you will need access to Azure OpenAI (leverages `gpt-4o` by default). 
 
 Codespace users can **skip steps 1 and 2**. For local development, follow all of the following steps.
 
@@ -53,7 +53,7 @@ Codespace users can **skip steps 1 and 2**. For local development, follow all of
    OPENAI_API_KEY=...
    OPENAI_API_VERSION=...  # e.g. 2024-02-01
    OPENAI_API_BASE=...  # e.g. https://your_org.openai.azure.com/
-   OPENAI_API_DEPLOYMENT_ID=...  # e.g. gpt-4
+   OPENAI_API_DEPLOYMENT_ID=...  # e.g. gpt-4o
    PULUMI_CONFIG_PASSPHRASE=...  # Required. Choose your own alphanumeric passphrase to be used for encrypting pulumi config
    ```
    Use the following resources to locate the required credentials:
@@ -110,8 +110,8 @@ Your data privacy is important to us. Data handling is governed by the DataRobot
 
 ### Change the LLM
 
-1. Modify the `LLM` setting in `infra/settings_generative.py` by changing `LLM=GlobalLLM.AZURE_OPENAI_GPT_4_O_MINI` to any other LLM from the `GlobalLLM` object. 
-     - Trial users: since the list of supported LLMs is limited, use the `OPENAI_API_DEPLOYMENT_ID` in `.env` to override which model is used in your azure organisation. You'll still see GPT 4o-mini in the playground, but the deployed app will use the provided azure deployment.  
+1. Modify the `LLM` setting in `infra/settings_generative.py` by changing `LLM=GlobalLLM.AZURE_OPENAI_GPT_4_O` to any other LLM from the `GlobalLLM` object. 
+     - Trial users: Please set `LLM=GlobalLLM.AZURE_OPENAI_GPT_4_O_MINI` since GPT-4o is not supported in the trial. Use the `OPENAI_API_DEPLOYMENT_ID` in `.env` to override which model is used in your azure organisation. You'll still see GPT 4o-mini in the playground, but the deployed app will use the provided azure deployment.  
 2. Provide the required credentials in `.env` dependent on your choice.
 3. Run `pulumi up` to update your stack (Or rerun your quickstart).
       ```bash

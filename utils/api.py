@@ -45,11 +45,11 @@ from openai.types.chat.chat_completion_system_message_param import (
 from openai.types.chat.chat_completion_user_message_param import (
     ChatCompletionUserMessageParam,
 )
+from pandas import DataFrame
 from plotly.subplots import make_subplots
 from pydantic import ValidationError
 
 sys.path.append("..")
-
 from utils import prompts
 from utils.code_execution import (
     InvalidGeneratedCode,
@@ -57,8 +57,13 @@ from utils.code_execution import (
     execute_python,
     reflect_code_generation_errors,
 )
+from utils.data_cleansing_helpers import (
+    add_summary_statistics,
+    try_datetime_conversion,
+    try_simple_numeric_conversion,
+    try_unit_conversion,
+)
 from utils.database_helpers import Database
-from utils.datetime_helpers import convert_datetime_series, is_date_column
 from utils.resources import LLMDeployment
 from utils.schema import (
     AiCatalogDataset,
@@ -67,8 +72,8 @@ from utils.schema import (
     BusinessAnalysisGeneration,
     ChartGenerationExecutionResult,
     ChatRequest,
+    CleansedColumnReport,
     CleansedDataset,
-    CleansingReport,
     CodeGeneration,
     DatabaseAnalysisCodeGeneration,
     DataDictionary,
@@ -631,76 +636,71 @@ async def _generate_run_analysis_python_code(
 async def cleanse_dataframes(
     datasets: list[AnalystDataset],
 ) -> list[CleansedDataset]:
-    """Clean and standardize multiple pandas DataFrames."""
-    cleaned_datasets = []
+    """Clean and standardize multiple pandas DataFrames.
+
+    Args:
+        datasets: List of AnalystDataset objects to clean
+
+    Returns:
+        List of CleansedDataset objects containing cleaned data and reports
+
+    Raises:
+        ValueError: If a dataset is empty
+    """
+    cleaned_datasets: list[CleansedDataset] = []
 
     for dataset in datasets:
-        cleaned_df = dataset.to_df()
+        report: list[CleansedColumnReport] = []
+        cleaned_df: DataFrame = dataset.to_df()
+
+        sample_df = cleaned_df.sample(min(100, len(cleaned_df)))
         if cleaned_df.empty:
             raise ValueError(f"Dataset {dataset.name} is empty")
 
-        report = CleansingReport(columns_cleaned=[], errors=[], warnings=[])
+        dtypes = cleaned_df.dtypes.to_dict()
+        for column_name in cleaned_df.columns:
+            # rename column:
+            cleaned_column_name = re.sub(r"\s+", " ", str(column_name).strip())
+            original_nulls = sample_df[column_name].isna()
 
-        # Clean column names
-        original_cols = cleaned_df.columns.tolist()
-        cleaned_df.columns = [
-            re.sub(r"\s+", " ", col.strip()) for col in cleaned_df.columns
-        ]  # type: ignore[assignment]
-        cleaned_cols = cleaned_df.columns.tolist()
+            column_report = CleansedColumnReport(new_column_name=cleaned_column_name)
+            if cleaned_column_name != column_name:
+                column_report.original_column_name = column_name
+                column_report.warnings.append(
+                    f"Column renamed from '{column_name}' to '{cleaned_column_name}'"
+                )
 
-        # Track column name changes
-        for orig, cleaned in zip(original_cols, cleaned_cols):
-            if orig != cleaned:
-                report.columns_cleaned.append(orig)
-                report.warnings.append(f"Column '{orig}' renamed to '{cleaned}'")
+            if dtypes[column_name] == "object":
+                column_report.original_dtype = "object"
 
-        # Process each column
-        for col in cleaned_df.columns:
-            try:
-                original = cleaned_df[col].copy()
+                conversions = [
+                    ("simple_clean", try_simple_numeric_conversion),
+                    ("unit_conversion", try_unit_conversion),
+                    ("datetime", try_datetime_conversion),
+                ]
+                try:
+                    for conversion_type, conversion_func in conversions:
+                        success, cleaned_series, warnings = conversion_func(
+                            cleaned_df[column_name],
+                            sample_df[column_name],
+                            original_nulls,
+                        )
 
-                # Handle numeric columns
-                if pd.api.types.is_numeric_dtype(cleaned_df[col]):
-                    cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors="coerce")
-                    if not cleaned_df[col].equals(original):
-                        report.columns_cleaned.append(col)
+                        # Add any warnings from the attempt
+                        column_report.warnings.extend(warnings)
 
-                # Handle potential numeric strings (with currency/percentage)
-                elif (
-                    cleaned_df[col].dtype == "object"
-                    and cleaned_df[col].notna().all()
-                    and cleaned_df[col]
-                    .str.replace(r"[$%,\s]", "", regex=True)
-                    .str.match(r"^-?\d*\.?\d*$")
-                    .all()
-                ):
-                    cleaned_df[col] = pd.to_numeric(
-                        cleaned_df[col]
-                        .astype(str)
-                        .str.replace(r"[$%,\s]", "", regex=True),
-                        errors="coerce",
-                    )
-                    report.columns_cleaned.append(col)
+                        if success:
+                            cleaned_df[column_name] = cleaned_series
+                            column_report.new_dtype = str(cleaned_series.dtype)
+                            column_report.conversion_type = conversion_type
+                            break
+                except Exception as e:
+                    column_report.errors.append(str(e))
 
-                # Handle dates
-                elif is_date_column(cleaned_df[col]):
-                    cleaned_df[col] = convert_datetime_series(cleaned_df[col])
-                    if not cleaned_df[col].equals(original):
-                        report.columns_cleaned.append(col)
+            cleaned_df = cleaned_df.rename(columns={column_name: cleaned_column_name})
+            report.append(column_report)
 
-                # Handle categorical
-                elif cleaned_df[col].dtype == "object":
-                    mask = cleaned_df[col].notna()
-                    if mask.any():
-                        temp = cleaned_df.loc[mask, col]
-                        if not pd.api.types.is_string_dtype(temp):
-                            temp = temp.astype(str)
-                        cleaned_df.loc[mask, col] = temp.str.strip()
-                        if not cleaned_df[col].equals(original):
-                            report.columns_cleaned.append(col)
-                cleaned_df = cleaned_df.replace({pd.NaT: None})
-            except Exception as e:
-                report.errors.append(f"Error processing column {col}: {str(e)}")
+        add_summary_statistics(cleaned_df, report)
 
         cleaned_datasets.append(
             CleansedDataset(
@@ -950,9 +950,11 @@ async def _run_analysis(
     code = await _generate_run_analysis_python_code(
         request, next(iter(exception_history), None)
     )
+
     dataframes: dict[str, pd.DataFrame] = {}
     for dataset in request.datasets:
         dataframes[dataset.name] = dataset.to_df()
+
     try:
         result = execute_python(
             modules={

@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+from typing import Any, Callable, Generator, Literal
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -33,8 +33,11 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    PrivateAttr,
+    GetJsonSchemaHandler,
+    ValidationInfo,
+    computed_field,
     field_validator,
+    model_validator,
 )
 
 from utils.code_execution import MaxReflectionAttempts
@@ -52,50 +55,115 @@ class AiCatalogDataset(BaseModel):
     size: str
 
 
+class DataFrameWrapper:
+    def __init__(self, df: pd.DataFrame) -> None:
+        self.df = df
+
+    def to_dict(self) -> list[dict[str, Any]]:
+        records = self.df.to_dict(orient="records")
+        records_str = [{str(k): v for k, v in record.items()} for record in records]
+        return records_str
+
+    @classmethod
+    def __get_validators__(
+        cls,
+    ) -> Generator[Callable[[Any, ValidationInfo], DataFrameWrapper], None, None]:
+        yield cls.validate
+
+    @classmethod
+    def validate(cls, v: Any, info: ValidationInfo) -> "DataFrameWrapper":
+        # Accept an already wrapped instance.
+        if isinstance(v, cls):
+            return v
+        if isinstance(v, pd.DataFrame):
+            return cls(v)
+        elif isinstance(v, list):
+            try:
+                df = pd.DataFrame.from_records(v)
+                return cls(df)
+            except Exception as e:
+                raise ValueError(
+                    "Invalid data format; expecting a list of records"
+                ) from e
+        raise ValueError("data must be either a pandas DataFrame or a list of records")
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: dict[str, Any], handler: GetJsonSchemaHandler
+    ) -> dict[str, Any]:
+        # This schema is used only if the field were included.
+        # We mark the field as excluded in the model, so it will not appear.
+        return {
+            "title": "DataFrameWrapper",
+            "type": "array",
+            "items": {"type": "object"},
+            "description": "Internal representation of data as a list of records (excluded from output)",
+        }
+
+
 class AnalystDataset(BaseModel):
-    name: str
-    _data: pd.DataFrame = PrivateAttr(default_factory=pd.DataFrame)
-    data: list[dict[str, Any]] = Field(
-        description="List of records with column names as keys",
-        json_schema_extra={
-            "example": [
-                {"column1": "value1", "column2": "value2"},
-                {"column1": "value3", "column2": "value4"},
-            ]
-        },
+    name: str = "analyst_dataset"
+    # The internal data field stores the DataFrame wrapped in DataFrameWrapper.
+    # It is excluded from the output and from the OpenAPI schema.
+    data: DataFrameWrapper = Field(
+        default_factory=lambda: DataFrameWrapper(pd.DataFrame()),
+        exclude=True,
+        description="Internal field storing the pandas DataFrame",
     )
 
-    def __init__(self, **data: Any):
-        df = None
-        if "data" in data and isinstance(data["data"], pd.DataFrame):
-            df = data["data"]
-            records = df.to_dict("records")
-            data["data"] = records
-        if "name" not in data:
-            data["name"] = "analyst_dataset"
-        super().__init__(**data)
-        if df is not None:
-            self._data = df
-        else:
-            self._data = pd.DataFrame.from_records(self.data)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @computed_field(
+        title="Data Records",
+        description="This field returns the data from the internal pandas DataFrame as a list of record dictionaries.",
+        examples=[[{"a": 1, "b": "x"}, {"a": 2, "b": "y"}]],
+        json_schema_extra={"type": "array", "items": {"type": "object"}},
+        return_type=list[dict[str, Any]],
+    )
+    def data_records(self) -> list[dict[str, Any]]:
+        return self.data.to_dict()
+
+    @model_validator(mode="before")
+    @classmethod
+    def reconstruct_data(cls, values: dict[str, Any]) -> dict[str, Any]:
+        """
+        If the input JSON does not include 'data' but includes 'data_records',
+        reconstruct the internal DataFrame from the records.
+        """
+        if "data" not in values and "data_records" in values:
+            try:
+                records = values["data_records"]
+                df = pd.DataFrame.from_records(records)
+                # Wrap the DataFrame before storing it.
+                values["data"] = DataFrameWrapper(df)
+            except Exception as e:
+                raise ValueError(
+                    "Invalid data_records for DataFrame reconstruction"
+                ) from e
+        return values
+
+    def to_df(self) -> pd.DataFrame:
+        """Return the internal pandas DataFrame."""
+        return self.data.df
 
     @property
     def columns(self) -> list[str]:
-        return self._data.columns.tolist()
-
-    def to_df(self) -> pd.DataFrame:
-        return self._data
+        return self.data.df.columns.tolist()
 
 
-class CleansingReport(BaseModel):
-    columns_cleaned: list[str]
-    errors: list[str]
-    warnings: list[str]
+class CleansedColumnReport(BaseModel):
+    new_column_name: str
+    original_column_name: str | None = None
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    original_dtype: str | None = None
+    new_dtype: str | None = None
+    conversion_type: str | None = None
 
 
 class CleansedDataset(BaseModel):
     dataset: AnalystDataset
-    cleaning_report: CleansingReport
+    cleaning_report: list[CleansedColumnReport]
 
     @property
     def name(self) -> str:
