@@ -14,6 +14,9 @@
 
 from __future__ import annotations
 
+import logging
+import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from pydantic import AliasChoices, AliasPath, Field
@@ -100,17 +103,19 @@ class AWSBedrockCredentials(DRCredentials):
 class SnowflakeCredentials(DRCredentials):
     """Snowflake Connection credentials auto-constructed using environment variables."""
 
-    user: str = Field(
+    user: str | None = Field(
+        default=None,
         validation_alias=AliasChoices(
             AliasPath("MLOPS_RUNTIME_PARAM_db_credential", "payload", "username"),
             "SNOWFLAKE_USER",
-        )
+        ),
     )
-    password: str = Field(
+    password: str | None = Field(
+        default=None,
         validation_alias=AliasChoices(
             AliasPath("MLOPS_RUNTIME_PARAM_db_credential", "payload", "password"),
             "SNOWFLAKE_PASSWORD",
-        )
+        ),
     )
     account: str = Field(
         validation_alias=AliasChoices(
@@ -122,31 +127,96 @@ class SnowflakeCredentials(DRCredentials):
         validation_alias=AliasChoices(
             AliasPath("MLOPS_RUNTIME_PARAM_SNOWFLAKE_DATABASE"),
             "SNOWFLAKE_DATABASE",
-        )
+        ),
     )
     warehouse: str = Field(
         validation_alias=AliasChoices(
             AliasPath("MLOPS_RUNTIME_PARAM_SNOWFLAKE_WAREHOUSE"),
             "SNOWFLAKE_WAREHOUSE",
-        )
+        ),
     )
     db_schema: str = Field(
         validation_alias=AliasChoices(
             AliasPath("MLOPS_RUNTIME_PARAM_SNOWFLAKE_SCHEMA"),
             "SNOWFLAKE_SCHEMA",
-        )
+        ),
     )
     role: str = Field(
         validation_alias=AliasChoices(
             AliasPath("MLOPS_RUNTIME_PARAM_SNOWFLAKE_ROLE"),
             "SNOWFLAKE_ROLE",
-        )
+        ),
     )
-    snowflake_key_path: str = Field(
+    snowflake_key_path: str | None = Field(
+        default=None,
         validation_alias=AliasChoices(
             AliasPath("MLOPS_RUNTIME_PARAM_SNOWFLAKE_KEY_PATH"), "SNOWFLAKE_KEY_PATH"
-        )
+        ),
     )
+
+    def get_private_key(self, project_root: Path | None = None) -> bytes | None:
+        """Get private key for Snowflake authentication if configured."""
+        logger = logging.getLogger(__name__)
+
+        key_path = self.snowflake_key_path
+        if not key_path:
+            return None
+
+        try:
+            if project_root:
+                key_path = os.path.join(project_root, key_path)
+            else:
+                key_path = os.path.abspath(key_path)
+            if not os.path.exists(key_path):
+                logger.warning(f"Snowflake key file not found at {key_path}")
+                return None
+
+            # Read and process private key
+            with open(key_path, "rb") as key_file:
+                private_key_data = key_file.read()
+                logger.info("Successfully read private key file")
+
+            # Load and convert key
+            from cryptography.hazmat.backends import default_backend
+            from cryptography.hazmat.primitives import serialization
+
+            p_key = serialization.load_pem_private_key(
+                private_key_data, password=None, backend=default_backend()
+            )
+            logger.info("Successfully loaded PEM key")
+
+            private_key = p_key.private_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+            logger.info("Successfully converted key to DER format")
+            return private_key
+
+        except Exception as e:
+            logger.warning(f"Failed to process private key: {str(e)}")
+            return None
+
+    def is_configured(self) -> bool:
+        """Check if Snowflake is properly configured with either key or password auth."""
+        has_basic_config = all(
+            [
+                self.user,
+                self.account,
+                self.warehouse,
+                self.database,
+                self.db_schema,
+                self.role,
+            ]
+        )
+        if not has_basic_config:
+            return False
+
+        # Check if we have either key file or password authentication
+        has_key_auth = self.snowflake_key_path is not None
+        has_password_auth = self.password is not None
+
+        return has_key_auth or has_password_auth
 
 
 class NoDatabaseCredentials(DRCredentials):

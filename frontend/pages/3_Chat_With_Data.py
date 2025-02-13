@@ -15,12 +15,12 @@
 import asyncio
 import logging
 import sys
+import uuid
 import warnings
 from dataclasses import dataclass
 from typing import Any, cast
 
 import streamlit as st
-from helpers import log_api_call, log_error_details
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from openai.types.chat.chat_completion_user_message_param import (
     ChatCompletionUserMessageParam,
@@ -29,10 +29,9 @@ from pydantic import ValidationError
 from streamlit.delta_generator import DeltaGenerator
 
 sys.path.append("..")
-
-
 # Import FastAPI functions directly
-from app_settings import PAGE_ICON, DataSource, apply_custom_css, get_page_logo
+from app_settings import PAGE_ICON, DataSource, apply_custom_css, display_page_logo
+from helpers import log_api_call, log_error_details, state_init
 
 from utils.api import (
     get_business_analysis,
@@ -44,6 +43,7 @@ from utils.api import (
 from utils.schema import (
     AnalysisError,
     AnalystChatMessage,
+    AnalystDataset,
     ChatRequest,
     DataDictionary,
     EnhancedQuestionGeneration,
@@ -64,24 +64,8 @@ warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Initialize session state variables at the very beginning of the file
-if "initialized" not in st.session_state:
-    st.session_state.initialized = True
-    st.session_state.datasets = []
-    st.session_state.cleansed_data = []
-    st.session_state.data_dictionaries = []
-    st.session_state.chat_messages = []
-    st.session_state.chat_input_key = 0
-    st.session_state.debug_mode = True
-    st.session_state.data_source = None
-    st.session_state.file_uploader_key = 0
-    st.session_state.processed_file_ids = []
-
-elif "chat_messages" not in st.session_state:
-    st.session_state.chat_messages = []
-elif "chat_input_key" not in st.session_state:
-    st.session_state.chat_input_key = 0
-
+# Initialize session state variables
+state_init(st.session_state)
 
 # Page config
 st.set_page_config(
@@ -103,6 +87,15 @@ def clear_chat() -> None:
 # Sidebar with New Chat button only
 with st.sidebar:
     st.title("Chat Controls")
+
+    enable_chart_generation = st.checkbox(
+        "Generate charts in conversation", value=True, key="enable_chart_generation"
+    )
+    enable_business_insights = st.checkbox(
+        "Enable business insights and follow up questions in conversation",
+        value=True,
+        key="enable_business_insights",
+    )
 
     # Add New Chat button with callback
     st.button("New Chat", on_click=clear_chat, use_container_width=True)
@@ -147,7 +140,9 @@ class UnifiedRenderer:
         return self._containers
 
     def render_message(
-        self, message: AnalystChatMessage, within_chat_context: bool = False
+        self,
+        message: AnalystChatMessage,
+        within_chat_context: bool = False,
     ) -> None:
         """
         Render a single message with all its components
@@ -240,10 +235,20 @@ class UnifiedRenderer:
         with self.containers.charts:
             if result.status == "error":
                 self.render_exception(result.metadata.exception)
+
+            index = uuid.uuid4()
             if result.fig1:
-                st.plotly_chart(result.fig1, use_container_width=True)
+                st.plotly_chart(
+                    result.fig1,
+                    use_container_width=True,
+                    key=f"message_{index}_fig1",
+                )
             if result.fig2:
-                st.plotly_chart(result.fig2, use_container_width=True)
+                st.plotly_chart(
+                    result.fig2,
+                    use_container_width=True,
+                    key=f"message_{index}_fig2",
+                )
 
     def render_business_results(self, result: GetBusinessAnalysisResult) -> None:
         """Render business analysis results"""
@@ -283,6 +288,44 @@ class UnifiedRenderer:
         if last_exception.code is not None:
             with st.expander("Last Executed Code"):
                 st.code(last_exception.code)
+
+
+async def execute_business_analysis_and_charts(
+    analysis_result: RunAnalysisResult | RunDatabaseAnalysisResult,
+    enhanced_message: str,
+) -> tuple[
+    RunChartsResult | BaseException | None,
+    GetBusinessAnalysisResult | BaseException | None,
+]:
+    analysis_result.dataset = cast(AnalystDataset, analysis_result.dataset)
+    # Prepare both requests
+    chart_request = RunChartsRequest(
+        dataset=analysis_result.dataset,
+        question=enhanced_message,
+    )
+
+    business_request = GetBusinessAnalysisRequest(
+        dataset=analysis_result.dataset,
+        dictionary=DataDictionary.from_analyst_df(analysis_result.dataset.to_df()),
+        question=enhanced_message,
+    )
+
+    if (
+        st.session_state.enable_chart_generation
+        and st.session_state.enable_business_insights
+    ):
+        # Run both analyses concurrently
+        return await asyncio.gather(
+            run_charts(chart_request),
+            get_business_analysis(business_request),
+            return_exceptions=True,
+        )
+    elif st.session_state.enable_chart_generation:
+        charts_result = await run_charts(chart_request)
+        return charts_result, None
+    else:
+        business_result = await get_business_analysis(business_request)
+        return None, business_result
 
 
 # Usage for historical messages
@@ -364,43 +407,26 @@ async def run_complete_analysis(
                             f"Error running initial analysis. Try rephrasing: {str(e)}"
                         )
                         return
-                    # if analysis_result.status == "error":
-                    #     error_context.update({"component": "analysis"})
-                    #     log_error_details(
-                    #         analysis_result.metadata.exception, error_context
-                    #     )
-                    #     renderer.render_exception(analysis_result.metadata.exception)
-                    #     return
                 # Run concurrent analyses if we have initial results
-                if analysis_result and analysis_result.dataset:
+                if (
+                    analysis_result
+                    and analysis_result.dataset
+                    and (
+                        st.session_state.enable_chart_generation
+                        or st.session_state.enable_business_insights
+                    )
+                ):
                     with st.spinner("Generating Insights..."):
                         try:
-                            # Prepare both requests
-                            chart_request = RunChartsRequest(
-                                dataset=analysis_result.dataset,
-                                question=enhanced_message,
-                            )
-
-                            business_request = GetBusinessAnalysisRequest(
-                                dataset=analysis_result.dataset,
-                                dictionary=DataDictionary.from_df(
-                                    analysis_result.dataset.to_df()
-                                ),
-                                question=enhanced_message,
-                            )
-
-                            # Run both analyses concurrently
-                            charts_result, business_result = await asyncio.gather(
-                                run_charts(chart_request),
-                                get_business_analysis(business_request),
-                                return_exceptions=True,
+                            (
+                                charts_result,
+                                business_result,
+                            ) = await execute_business_analysis_and_charts(
+                                analysis_result, enhanced_message
                             )
 
                             # Handle concurrent results
-                            if not isinstance(charts_result, BaseException):
-                                assistant_message.components.append(charts_result)
-                                renderer.render_charts(charts_result)
-                            else:
+                            if isinstance(charts_result, BaseException):
                                 error_context.update(
                                     {"component": "concurrent_processing_charts"}
                                 )
@@ -409,11 +435,13 @@ async def run_complete_analysis(
                                     st.error(
                                         f"Error generating charts: {str(charts_result)}"
                                     )
-
-                            if not isinstance(business_result, BaseException):
-                                assistant_message.components.append(business_result)
-                                renderer.render_business_results(business_result)
+                            elif charts_result is None:
+                                pass
                             else:
+                                assistant_message.components.append(charts_result)
+                                renderer.render_charts(charts_result)
+
+                            if isinstance(business_result, BaseException):
                                 error_context.update(
                                     {"component": "concurrent_processing_business"}
                                 )
@@ -422,6 +450,11 @@ async def run_complete_analysis(
                                     st.error(
                                         f"Error generating business analysis: {str(business_result)}"
                                     )
+                            elif business_result is None:
+                                pass
+                            else:
+                                assistant_message.components.append(business_result)
+                                renderer.render_business_results(business_result)
 
                         except Exception as e:
                             error_context.update(
@@ -441,7 +474,7 @@ async def run_complete_analysis(
 
 async def main() -> None:
     # Main page content (Chat Interface)
-    st.image(get_page_logo(), width=200)
+    display_page_logo()
     st.session_state.chat_messages = cast(
         list[AnalystChatMessage], st.session_state.chat_messages
     )
@@ -489,7 +522,6 @@ async def main() -> None:
             valid_messages.append(
                 ChatCompletionUserMessageParam(role="user", content=question)
             )
-
             # Create chat request and run analysis
             chat_request = ChatRequest(messages=valid_messages)
             error_context = {

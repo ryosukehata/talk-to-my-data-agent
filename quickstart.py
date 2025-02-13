@@ -64,7 +64,7 @@ def check_pulumi_login():
 def check_dotenv_exists():
     if not dot_env_file.exists():
         print(
-            "Could not find `.env`. Please rename the file `.env.template` and fill in your details"
+            "Could not find `.env`. Please rename the file `.env` and fill in your details"
         )
         exit(1)
 

@@ -184,7 +184,7 @@ class DataDictionary(BaseModel):
     column_descriptions: list[DataDictionaryColumn]
 
     @classmethod
-    def from_df(
+    def from_analyst_df(
         cls,
         df: pd.DataFrame,
         name: str = "analysis_result",
@@ -202,7 +202,26 @@ class DataDictionary(BaseModel):
             ],
         )
 
-    def to_df(self) -> pd.DataFrame:
+    @classmethod
+    def from_application_df(
+        cls, df: pd.DataFrame, name: str = "analysis_result"
+    ) -> "DataDictionary":
+        columns = {"column", "description", "data_type"}
+        if not columns.issubset(df.columns):
+            raise ValueError(f"DataFrame must contain columns: {columns}")
+
+        column_descriptions = [
+            DataDictionaryColumn(
+                column=row["column"],
+                description=row["description"],
+                data_type=row["data_type"],
+            )
+            for _, row in df.iterrows()
+        ]
+
+        return DataDictionary(name=name, column_descriptions=column_descriptions)
+
+    def to_application_df(self) -> pd.DataFrame:
         return pd.DataFrame(
             {
                 "column": [c.column for c in self.column_descriptions],
@@ -445,7 +464,7 @@ class CodeGeneration(BaseModel):
 RuntimeCredentialType = Literal["llm", "db"]
 
 
-DatabaseConnectionType = Literal["bigquery", "snowflake", "no_database"]
+DatabaseConnectionType = Literal["snowflake", "bigquery", "no_database"]
 
 
 class AppInfra(BaseModel):
@@ -454,6 +473,16 @@ class AppInfra(BaseModel):
 
 
 UserRoleType = Literal["assistant", "user", "system"]
+
+
+class Tool(BaseModel):
+    name: str
+    signature: str
+    docstring: str
+    function: Callable[..., Any]
+
+    def __str__(self) -> str:
+        return f"function: {self.name}{self.signature}\n{self.docstring}\n\n"
 
 
 class AnalystChatMessage(BaseModel):

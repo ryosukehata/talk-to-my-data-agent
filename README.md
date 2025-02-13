@@ -1,15 +1,15 @@
-# "Talk to my data" agent
+# Talk to My Data  
 
-The "Talk to my data" Agent provides a talk-to-your-data experience. Upload a .csv, ask a question, and
-the agent recommends business analyses. It then produces charts and tables to
-answer your question (including the source code). This experience is paired with MLOps to host, monitor,
-and govern the components.
+**Talk to My Data** delivers a seamless **talk-to-your-data** experience, transforming files, spreadsheets, and cloud data into actionable insights. Simply upload data, connect to Snowflake or BigQuery, or access datasets from DataRobot's AI Catalog. Then, ask a question, and the agent recommends business analyses, generating **charts, tables, and even code** to help you interpret the results.  
+
+This intuitive experience is designed for **scalability and flexibility**, ensuring that whether you're working with a few thousand rows or billions, your data analysis remains **fast, efficient, and insightful**.  
+
 
 > [!WARNING]
 > Application templates are intended to be starting points that provide guidance on how to develop, serve, and maintain AI applications.
 > They require a developer or data scientist to adapt and modify them for their business requirements before being put into production.
 
-![Using the "Talk to my data" agent](https://s3.us-east-1.amazonaws.com/datarobot_public/drx/recipe_gifs/launch_gifs/talktomydata.gif)
+![Using the "Talk to My Data" agent](https://s3.us-east-1.amazonaws.com/datarobot_public/drx/recipe_gifs/launch_gifs/talktomydata.gif)
 
 
 ## Table of contents
@@ -20,11 +20,12 @@ and govern the components.
 5. [Make changes](#make-changes)
    - [Change the LLM](#change-the-llm)
    - [Change the database](#change-the-database)
-      * [No database](#no-database)
+      * [Snowflake](#snowflake)
       * [BigQuery](#bigquery)
-6. [Share results](#share-results)
-7. [Delete all provisioned resources](#delete-all-provisioned-resources)
-8. [Setup for advanced users](#setup-for-advanced-users)
+6. [Tools](#tools)
+7. [Share results](#share-results)
+8. [Delete all provisioned resources](#delete-all-provisioned-resources)
+9. [Setup for advanced users](#setup-for-advanced-users)
 
 ## Setup
 
@@ -121,22 +122,33 @@ Your data privacy is important to us. Data handling is governed by the DataRobot
 
 ### Change the database
 
-#### No database
+#### Snowflake
 
-To remove the database connection completely:
+To add Snowflake support:
 
-1. Modify the `DATABASE_CONNECTION_TYPE` setting in `infra/settings_database.py` by changing `DATABASE_CONNECTION_TYPE="snowflake"` to `DATABASE_CONNECTION_TYPE="no_database"`.
+1. Modify the `DATABASE_CONNECTION_TYPE` setting in `infra/settings_database.py` by changing `DATABASE_CONNECTION_TYPE = "no_database"` to `DATABASE_CONNECTION_TYPE = "snowflake"`.
+2. Provide snowflake credentials in `.env` by either setting `SNOWFLAKE_USER` and `SNOWFLAKE_PASSWORD` or by setting `SNOWFLAKE_KEY_PATH` to a file containing the key. The key file should be a `*.p8` private key file. (see [Snowflake Documentation](https://docs.snowflake.com/en/user-guide/key-pair-auth))
+3. Fill out the remaining snowflake connection settings in `.env` (refer to `.env.template` for more details)
+4. Run `pulumi up` to update your stack (Or re-run the quickstart).
+      ```bash
+      source set_env.sh  # On windows use `set_env.bat`
+      pulumi up
+      ```
  
 #### BigQuery
 
 The Talk to my Data Agent supports connecting to BigQuery.
-1. Modify the `DATABASE_CONNECTION_TYPE` setting in `infra/settings_database.py` by changing `DATABASE_CONNECTION_TYPE=snowflake` to `DATABASE_CONNECTION_TYPE=bigquery`. 
+1. Modify the `DATABASE_CONNECTION_TYPE` setting in `infra/settings_database.py` by changing `DATABASE_CONNECTION_TYPE = "no_database"` to `DATABASE_CONNECTION_TYPE = "bigquery"`. 
 2. Provide the required google credentials in `.env` dependent on your choice.  Ensure that GOOGLE_DB_SCHEMA is also populated in `.env`.
 3. Run `pulumi up` to update your stack (Or rerun your quickstart).
       ```bash
       source set_env.sh  # On windows use `set_env.bat`
       pulumi up
       ```
+
+## Tools
+
+You can help the data analyst python agent by providing tools that can assist with data analysis tasks. For that, define functions in `utils/tools.py`. The function will be made available inside the code execution environment of the agent. The name, docstring and signature will be provided to the agent inside the prompt.
 
 ## Share results
 

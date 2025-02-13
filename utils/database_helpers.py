@@ -17,11 +17,11 @@ from __future__ import annotations
 import functools
 import json
 import logging
-import os
 import traceback
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Generator, Generic, TypeVar, cast
 
 import pandas as pd
@@ -130,47 +130,17 @@ class SnowflakeOperator(DatabaseOperator[SnowflakeCredentialArgs]):
         credentials: SnowflakeCredentials,
         default_timeout: int = _DEFAULT_DB_QUERY_TIMEOUT,
     ):
+        if not credentials.is_configured():
+            raise ValueError("Snowflake credentials not properly configured")
         self._credentials = credentials
         self.default_timeout = default_timeout
-
-    def _get_private_key(self) -> bytes | None:
-        key_path = self._credentials.snowflake_key_path
-        if key_path and os.path.exists(key_path):
-            try:
-                # Read and process private key
-                with open(key_path, "rb") as key_file:
-                    private_key_data = key_file.read()
-                    logger.info("Successfully read private key file")
-
-                # Load and convert key
-                from cryptography.hazmat.backends import default_backend
-                from cryptography.hazmat.primitives import serialization
-
-                p_key = serialization.load_pem_private_key(
-                    private_key_data, password=None, backend=default_backend()
-                )
-                logger.info("Successfully loaded PEM key")
-
-                private_key = p_key.private_bytes(
-                    encoding=serialization.Encoding.DER,
-                    format=serialization.PrivateFormat.PKCS8,
-                    encryption_algorithm=serialization.NoEncryption(),
-                )
-                logger.info("Successfully converted key to DER format")
-
-                # Add private key to connection parameters
-                return private_key
-
-            except Exception as e:
-                logger.warning(
-                    f"Failed to process private key: {str(e)}, falling back to password authentication"
-                )
-        logger.info("No valid private key path found, using password authentication")
-        return None
 
     @contextmanager
     def create_connection(self) -> Generator[snowflake.connector.SnowflakeConnection]:
         """Create a connection to Snowflake using environment variables"""
+        if not self._credentials.is_configured():
+            raise ValueError("Snowflake credentials not properly configured")
+
         connect_params: dict[str, Any] = {
             "user": self._credentials.user,
             "account": self._credentials.account,
@@ -179,10 +149,17 @@ class SnowflakeOperator(DatabaseOperator[SnowflakeCredentialArgs]):
             "schema": self._credentials.db_schema,
             "role": self._credentials.role,
         }
-        if private_key := self._get_private_key():
+
+        # Try key file authentication first if configured
+        project_root = Path(__file__).resolve().parent.parent
+        if private_key := self._credentials.get_private_key(project_root=project_root):
             connect_params["private_key"] = private_key
-        else:
+        elif self._credentials.password:
             connect_params["password"] = self._credentials.password
+        else:
+            raise ValueError(
+                "Neither private key nor password authentication configured"
+            )
 
         connection = snowflake.connector.connect(**connect_params)
         yield connection
@@ -264,8 +241,8 @@ class SnowflakeOperator(DatabaseOperator[SnowflakeCredentialArgs]):
                     # Check if schema exists
                     cursor.execute(
                         f"""
-                        SELECT COUNT(*) 
-                        FROM {self._credentials.database}.INFORMATION_SCHEMA.SCHEMATA 
+                        SELECT COUNT(*)
+                        FROM {self._credentials.database}.INFORMATION_SCHEMA.SCHEMATA
                         WHERE SCHEMA_NAME = '{self._credentials.db_schema}'
                     """,
                     )
@@ -276,7 +253,7 @@ class SnowflakeOperator(DatabaseOperator[SnowflakeCredentialArgs]):
                     cursor.execute(
                         f"""
                         SELECT table_name, table_type
-                        FROM {self._credentials.database}.information_schema.tables 
+                        FROM {self._credentials.database}.information_schema.tables
                         WHERE table_schema = '{self._credentials.db_schema}'
                         AND table_type IN ('BASE TABLE', 'VIEW')
                         ORDER BY table_type, table_name
@@ -548,9 +525,26 @@ class BigQueryOperator(DatabaseOperator[BigQueryCredentialArgs]):
 
 def get_database_operator(app_infra: AppInfra) -> DatabaseOperator[Any]:
     if app_infra.database == "bigquery":
-        return BigQueryOperator(GoogleCredentials())
+        credentials: GoogleCredentials | SnowflakeCredentials | NoDatabaseCredentials
+        try:
+            credentials = GoogleCredentials()
+            if credentials.service_account_key and credentials.db_schema:
+                return BigQueryOperator(credentials)
+        except (ValidationError, ValueError):
+            logger.warning(
+                "BigQuery credentials not properly configured, falling back to no database"
+            )
+        return NoDatabaseOperator(NoDatabaseCredentials())
     elif app_infra.database == "snowflake":
-        return SnowflakeOperator(SnowflakeCredentials())
+        try:
+            credentials = SnowflakeCredentials()
+            if credentials.is_configured():
+                return SnowflakeOperator(credentials)
+        except (ValidationError, ValueError):
+            logger.warning(
+                "Snowflake credentials not properly configured, falling back to no database"
+            )
+        return NoDatabaseOperator(NoDatabaseCredentials())
     else:
         return NoDatabaseOperator(NoDatabaseCredentials())
 

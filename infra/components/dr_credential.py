@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import textwrap
 from typing import Any
 
@@ -23,7 +24,7 @@ import pulumi_datarobot as datarobot
 import pydantic
 
 from infra.common.globals import GlobalLLM, LLMConfig
-from infra.common.stack import project_name
+from infra.common.stack import PROJECT_ROOT, project_name
 from utils.credentials import (
     AWSBedrockCredentials,
     AzureOpenAICredentials,
@@ -36,6 +37,8 @@ from utils.schema import (
     DatabaseConnectionType,
     RuntimeCredentialType,
 )
+
+logger = logging.getLogger("DataAnalystFrontend")
 
 
 def get_credential_runtime_parameter_values(
@@ -381,27 +384,50 @@ def get_database_credentials(
     database: DatabaseConnectionType,
     test_credentials: bool = True,
 ) -> SnowflakeCredentials | GoogleCredentials | NoDatabaseCredentials:
+    credentials: SnowflakeCredentials | GoogleCredentials | NoDatabaseCredentials
+
     try:
-        credentials: SnowflakeCredentials | GoogleCredentials | NoDatabaseCredentials
         if database == "no_database":
             return NoDatabaseCredentials()
-        con: snowflake.connector.SnowflakeConnection | google.cloud.bigquery.Client
+
         if database == "snowflake":
             credentials = SnowflakeCredentials()
+            if not credentials.is_configured():
+                logger.warning("Snowflake credentials not fully configured")
+                return NoDatabaseCredentials()
+
             if test_credentials:
                 import snowflake.connector
 
                 connect_params: dict[str, Any] = {
                     "user": credentials.user,
-                    "password": credentials.password,
                     "account": credentials.account,
                     "warehouse": credentials.warehouse,
                     "database": credentials.database,
                     "schema": credentials.db_schema,
                     "role": credentials.role,
                 }
-                con = snowflake.connector.connect(**connect_params)
-                con.close()
+
+                if private_key := credentials.get_private_key(
+                    project_root=PROJECT_ROOT
+                ):
+                    connect_params["private_key"] = private_key
+                elif credentials.password:
+                    connect_params["password"] = credentials.password
+                else:
+                    logger.warning(
+                        "No valid authentication method configured for Snowflake"
+                    )
+                    return NoDatabaseCredentials()
+
+                try:
+                    sf_con = snowflake.connector.connect(**connect_params)
+                    sf_con.close()
+                except Exception as e:
+                    logger.warning(f"Failed to test Snowflake connection: {str(e)}")
+                    return NoDatabaseCredentials()
+
+            return credentials
 
         elif database == "bigquery":
             credentials = GoogleCredentials()
@@ -415,13 +441,12 @@ def get_database_credentials(
                         scopes=["https://www.googleapis.com/auth/cloud-platform"],
                     )
                 )
-                con = google.cloud.bigquery.Client(credentials=google_credentials)
-                con.close()  # type: ignore
+                bq_con = google.cloud.bigquery.Client(credentials=google_credentials)
+                bq_con.close()  # type: ignore
 
     except pydantic.ValidationError as exc:
-        msg = "Validation errors, please check that .env is correct. Remember to run `source set_env.sh` (or set_env.bat/Set-Env.ps1 on windows):\n\n"
-        for error in exc.errors():
-            msg += f"- Field '{error['loc'][0]}': {error['msg']}" + "\n"
-        raise TypeError("Could not Validate database Credentials" + "\n" + msg) from exc
+        msg = "Validation errors in database credentials. Using no database configuration.\n"
+        logger.warning(msg + str(exc))
+        return NoDatabaseCredentials()
 
-    return credentials
+    return NoDatabaseCredentials()

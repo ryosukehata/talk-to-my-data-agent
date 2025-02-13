@@ -194,10 +194,10 @@ def try_datetime_conversion(
             sample_series, dayfirst=True, errors="coerce", cache=True
         )
 
-    if candidate_1.notnull().mean() > 0.8 or candidate_2.notnull().mean() > 0.8:
-        success_rate = max(candidate_1.notnull().mean(), candidate_2.notnull().mean())
+    if candidate_1.notna().mean() > 0.8 or candidate_2.notna().mean() > 0.8:
+        success_rate = max(candidate_1.notna().mean(), candidate_2.notna().mean())
         warnings.append(f"Converted to datetime. Success rate: {success_rate:.1%}")
-        if candidate_1.notnull().mean() > candidate_2.notnull().mean():
+        if candidate_1.notna().mean() > candidate_2.notna().mean():
             warnings.append("Used month-first date parsing")
             with suppress_datetime_warnings():
                 ts_series = pd.to_datetime(series, errors="coerce")

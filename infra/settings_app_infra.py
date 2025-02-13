@@ -18,9 +18,11 @@ from typing import List, Sequence, Tuple
 import datarobot as dr
 import pulumi
 import pulumi_datarobot as datarobot
+from settings_database import DATABASE_CONNECTION_TYPE
 
 from infra.common.schema import ApplicationSourceArgs
 from infra.common.stack import PROJECT_ROOT, project_name
+from utils.credentials import SnowflakeCredentials
 
 application_path = PROJECT_ROOT / "frontend"
 
@@ -115,5 +117,15 @@ def get_app_files(
     source_files.append(
         ((application_path / "metadata.yaml").as_posix(), "metadata.yaml")
     )
+
+    if DATABASE_CONNECTION_TYPE == "snowflake":
+        credentials = SnowflakeCredentials()
+        if credentials.snowflake_key_path:
+            # Add the snowflake connection file if it exists
+            snowflake_file = PROJECT_ROOT / credentials.snowflake_key_path
+            if snowflake_file.is_file():
+                source_files.append(
+                    (str(snowflake_file), credentials.snowflake_key_path)
+                )
 
     return source_files

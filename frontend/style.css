@@ -17,3 +17,31 @@ body,
 .stDownloadButton button {
   width: 100%;
 }
+
+/* Add rounded corners to images */
+img {
+  border-radius: 8px;
+}
+/* Remove rounded corners from DataRobot logo */
+.st-key-datarobot-logo img {
+  border-radius: 0;
+}
+/* Add rounded corners to chat input */
+.stChatInput {
+  border-radius: 12px;
+}
+
+/* Add rounded corners to chat messages */
+.stChatMessage {
+  border-radius: 12px;
+}
+
+/* Add rounded corners to buttons */
+button {
+  border-radius: 8px !important;
+}
+
+/* Add rounded corners to input fields */
+.stTextInput input {
+  border-radius: 8px;
+}
