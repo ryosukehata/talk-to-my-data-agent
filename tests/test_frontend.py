@@ -72,8 +72,8 @@ def app_post_database_load(application: AppTest, pulumi_up: Any) -> AppTest:
 
 
 def test_database_queried(app_post_database_load: AppTest) -> None:
-    success_message = "✅ Data processed and dictionaries generated successfully!"
-    assert app_post_database_load.success[1].value == success_message
+    success_message = "Data processed and dictionaries generated successfully!"
+    assert app_post_database_load.toast[0].value == success_message
 
 
 def test_data_dictionary_generated(app_post_database_load: AppTest) -> None:

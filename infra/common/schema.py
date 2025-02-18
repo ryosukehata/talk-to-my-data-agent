@@ -111,7 +111,7 @@ class CustomModelArgs(BaseModel):
     name: str
     replicas: int | None = None
     description: str | None = None
-    base_environment_id: str
+    base_environment_id: str | None = None
     base_environment_version_id: str | None = None
     target_name: str | None = None
     target_type: str | None = None

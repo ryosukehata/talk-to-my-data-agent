@@ -24,6 +24,7 @@ import re
 import sys
 import tempfile
 from datetime import datetime
+from types import ModuleType
 from typing import (
     Any,
     TypeVar,
@@ -488,7 +489,7 @@ async def suggest_questions(
     return validated_questions
 
 
-def find_imports(module: Any) -> list[str]:
+def find_imports(module: ModuleType) -> list[str]:
     """
     Get top-level third-party imports from a Python module.
 
@@ -503,50 +504,56 @@ def find_imports(module: Any) -> list[str]:
         >>> imports = find_third_party_imports(my_module)
         >>> print(imports)  # ['pandas', 'numpy', 'requests']
     """
-    # Get the source code of the module
-    source = inspect.getsource(module)
-    tree = ast.parse(source)
+    try:
+        # Get the source code of the module
+        source = inspect.getsource(module)
+        tree = ast.parse(source)
 
-    stdlib_modules = set(sys.stdlib_module_names)
-    third_party = set()
+        stdlib_modules = set(sys.stdlib_module_names)
+        third_party = set()
 
-    # Only look at top-level imports
-    for node in tree.body:
-        if isinstance(node, ast.Import):
-            for name in node.names:
-                module_name = name.name.split(".")[0]
+        # Only look at top-level imports
+        for node in tree.body:
+            if isinstance(node, ast.Import):
+                for name in node.names:
+                    module_name = name.name.split(".")[0]
+                    if module_name not in stdlib_modules:
+                        third_party.add(module_name)
+
+            elif isinstance(node, ast.ImportFrom):
+                if node.module is None:
+                    continue
+                module_name = node.module.split(".")[0]
                 if module_name not in stdlib_modules:
                     third_party.add(module_name)
 
-        elif isinstance(node, ast.ImportFrom):
-            if node.module is None:
-                continue
-            module_name = node.module.split(".")[0]
-            if module_name not in stdlib_modules:
-                third_party.add(module_name)
-
-    return sorted(third_party)
+        return sorted(third_party)
+    except Exception:
+        return []
 
 
 def get_tools() -> list[Tool]:
-    # find all functions defined in the tools module
-    tool_functions = [func for func in dir(tools) if callable(getattr(tools, func))]
+    try:
+        # find all functions defined in the tools module
+        tool_functions = [func for func in dir(tools) if callable(getattr(tools, func))]
 
-    # find the function signatures and doc strings
-    tools_list = []
-    for func_name in tool_functions:
-        func = getattr(tools, func_name)
-        signature = inspect.signature(func)
-        docstring = inspect.getdoc(func)
-        tools_list.append(
-            Tool(
-                name=func_name,
-                signature=str(signature),
-                docstring=docstring,
-                function=func,
+        # find the function signatures and doc strings
+        tools_list = []
+        for func_name in tool_functions:
+            func = getattr(tools, func_name)
+            signature = inspect.signature(func)
+            docstring = inspect.getdoc(func)
+            tools_list.append(
+                Tool(
+                    name=func_name,
+                    signature=str(signature),
+                    docstring=docstring,
+                    function=func,
+                )
             )
-        )
-    return tools_list
+        return tools_list
+    except Exception:
+        return []
 
 
 async def _generate_run_charts_python_code(
@@ -604,7 +611,6 @@ async def _generate_run_charts_python_code(
 async def _generate_run_analysis_python_code(
     request: RunAnalysisRequest,
     validation_error: InvalidGeneratedCode | None = None,
-    use_tools: bool = False,
 ) -> str:
     """
     Generate Python analysis code based on JSON data and question.
@@ -667,12 +673,14 @@ async def _generate_run_analysis_python_code(
             content=f"Data Dictionary:\n{json.dumps(dictionary_data)}",
         ),
     ]
-    if use_tools:
+
+    tools = get_tools()
+    if len(tools) > 0:
         messages.append(
             ChatCompletionUserMessageParam(
                 role="user",
                 content="If it helps the analysis, you can optionally use following functions:\n"
-                + "\n".join([str(t) for t in get_tools()]),
+                + "\n".join([str(t) for t in tools]),
             )
         )
 
@@ -1013,7 +1021,6 @@ async def get_business_analysis(
 async def _run_analysis(
     request: RunAnalysisRequest,
     exception_history: list[InvalidGeneratedCode] | None = None,
-    use_tools: bool = True,
 ) -> RunAnalysisResult:
     start_time = datetime.now()
     if not request.datasets:
@@ -1023,16 +1030,16 @@ async def _run_analysis(
         exception_history = []
 
     code = await _generate_run_analysis_python_code(
-        request, next(iter(exception_history), None), use_tools
+        request, next(iter(exception_history), None)
     )
 
     dataframes: dict[str, pd.DataFrame] = {}
     for dataset in request.datasets:
         dataframes[dataset.name] = dataset.to_df()
     functions = {}
-    if use_tools:
-        for tool in get_tools():
-            functions[tool.name] = tool.function
+    tool_functions = get_tools()
+    for tool in tool_functions:
+        functions[tool.name] = tool.function
     try:
         result = execute_python(
             modules={

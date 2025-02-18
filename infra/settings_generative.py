@@ -20,7 +20,7 @@ import pulumi_datarobot as datarobot
 
 from utils.schema import LLMDeploymentSettings
 
-from .common.globals import GlobalLLM, GlobalRuntimeEnvironment
+from .common.globals import GlobalLLM
 from .common.schema import (
     CustomModelArgs,
     DeploymentArgs,
@@ -35,7 +35,6 @@ LLM = GlobalLLM.AZURE_OPENAI_GPT_4_O
 custom_model_args = CustomModelArgs(
     resource_name=f"Generative Analyst Custom Model [{project_name}]",
     name="Generative Analyst Assistant",  # built-in QA app uses this as the AI's name
-    base_environment_id=GlobalRuntimeEnvironment.PYTHON_311_MODERATIONS.value.id,
     target_name=LLMDeploymentSettings().target_feature_name,
     target_type=dr.enums.TARGET_TYPE.TEXT_GENERATION,
     replicas=2,
