@@ -18,6 +18,7 @@ import plotly.graph_objects as go
 import pytest
 import pytest_asyncio
 
+from utils.analyst_db import AnalystDB, DataSourceType
 from utils.schema import (
     AnalystDataset,
     CleansedDataset,
@@ -34,29 +35,34 @@ from utils.schema import (
 
 @pytest_asyncio.fixture(scope="module")
 async def dataset_cleansed(
-    pulumi_up: Any, dataset_loaded: AnalystDataset
-) -> list[CleansedDataset]:
+    pulumi_up: Any, dataset_loaded: AnalystDataset, analyst_db: AnalystDB
+) -> CleansedDataset:
     from utils.api import (
-        cleanse_dataframes,
+        cleanse_dataframe,
     )
 
-    result = await cleanse_dataframes([dataset_loaded])
+    result = await cleanse_dataframe(dataset_loaded)
+    await analyst_db.register_dataset(result, data_source=DataSourceType.FILE)
     return result
 
 
-def test_dataset_is_cleansed(dataset_cleansed: list[CleansedDataset]) -> None:
-    assert len(dataset_cleansed) == 1
+def test_dataset_is_cleansed(dataset_cleansed: CleansedDataset) -> None:
+    assert dataset_cleansed.cleaning_report is not None
 
 
 @pytest_asyncio.fixture(scope="module")
 async def data_dictionary(
-    pulumi_up: Any, dataset_loaded: AnalystDataset
-) -> list[DataDictionary]:
+    pulumi_up: Any,
+    dataset_loaded: AnalystDataset,
+    analyst_db: AnalystDB,
+) -> DataDictionary:
     from utils.api import (
-        get_dictionaries,
+        get_dictionary,
     )
 
-    dictionary_result = await get_dictionaries([dataset_loaded])
+    dictionary_result = await get_dictionary(dataset_loaded)
+    await analyst_db.register_data_dictionary(dictionary_result)
+
     return dictionary_result
 
 
@@ -68,13 +74,13 @@ def question() -> str:
 @pytest.fixture
 def run_analysis_request(
     pulumi_up: Any,
-    dataset_cleansed: list[CleansedDataset],
-    data_dictionary: list[DataDictionary],
+    dataset_cleansed: CleansedDataset,
+    data_dictionary: DataDictionary,
     question: str,
+    analyst_db: AnalystDB,
 ) -> RunAnalysisRequest:
     analysis_request = RunAnalysisRequest(
-        datasets=[ds.dataset for ds in dataset_cleansed],
-        dictionaries=data_dictionary,
+        dataset_names=[dataset_cleansed.name],
         question=question,
     )
     return analysis_request
@@ -137,13 +143,16 @@ def business_request(
 
 @pytest.mark.asyncio
 async def test_run_analysis(
-    pulumi_up: Any, run_analysis_request: RunAnalysisRequest
+    pulumi_up: Any,
+    run_analysis_request: RunAnalysisRequest,
+    dataset_loaded: AnalystDataset,
+    analyst_db: AnalystDB,
 ) -> None:
     from utils.api import (
         run_analysis,
     )
 
-    run_analysis_result = await run_analysis(run_analysis_request)
+    run_analysis_result = await run_analysis(run_analysis_request, analyst_db)
 
     assert run_analysis_result.code is not None
     assert len(run_analysis_result.code) > 1

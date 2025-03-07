@@ -8,4 +8,4 @@
 #
 
 echo "Starting App"
-streamlit run 'Connect & Explore.py' --server.maxUploadSize 400
+streamlit run 'app.py' --server.maxUploadSize 200

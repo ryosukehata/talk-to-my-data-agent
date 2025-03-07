@@ -13,9 +13,12 @@
 # limitations under the License.
 
 
+import sys
+
 import streamlit as st
 from streamlit_theme import st_theme
 
+sys.path.append("..")
 from utils.schema import AppInfra
 
 PAGE_ICON = "./datarobot_favicon.png"
@@ -54,9 +57,3 @@ def apply_custom_css() -> None:
     with open("./style.css") as f:
         css = f.read()
         st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
-
-
-class DataSource(object):
-    DATABASE = "database"
-    FILE = "file"
-    CATALOG = "catalog"

@@ -35,6 +35,9 @@ class GlobalRuntimeEnvironment(Enum):
     PYTHON_311_MODERATIONS = RuntimeEnvironment(
         name="[GenAI] Python 3.11 with Moderations", id="65f9b27eab986d30d4c64268"
     )
+    PYTHON_312_MODERATIONS = RuntimeEnvironment(
+        name="[GenAI] Python 3.12 with Moderations", id="67ab469cecdca772287de644"
+    )
     PYTHON_39_CUSTOM_METRICS = RuntimeEnvironment(
         name="[DataRobot] Python 3.9 Custom Metrics Templates Drop-In",
         id="659bf1626529ceb502d12ae2",

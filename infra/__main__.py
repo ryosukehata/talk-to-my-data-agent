@@ -115,7 +115,7 @@ db_credential = get_database_credentials(DATABASE_CONNECTION_TYPE)
 db_runtime_parameter_values = get_credential_runtime_parameter_values(
     db_credential, "db"
 )
-app_runtime_parameters += db_runtime_parameter_values  # type: ignore
+app_runtime_parameters += db_runtime_parameter_values  # type: ignore[arg-type]
 
 
 app_source = datarobot.ApplicationSource(
@@ -124,20 +124,22 @@ app_source = datarobot.ApplicationSource(
     ),
     runtime_parameter_values=app_runtime_parameters,
     base_environment_id=GlobalRuntimeEnvironment.PYTHON_312_APPLICATION_BASE.value.id,
+    resources=datarobot.ApplicationSourceResourcesArgs(
+        replicas=2,
+        resource_label="cpu.xlarge",
+        session_affinity=True,
+    ),
     **settings_app_infra.app_source_args,
 )
 
-app_source_version_id = pulumi.Output.all(app_source.id, app_source.version_id).apply(
-    lambda args: settings_app_infra.ensure_app_source_settings(*args)
-)
 
 app = datarobot.CustomApplication(
     resource_name=settings_app_infra.app_resource_name,
     source_version_id=app_source.version_id,
     use_case_ids=[use_case.id],
+    allow_auto_stopping=True,
 )
 
-app.id.apply(settings_app_infra.ensure_app_settings)
 
 pulumi.export(llm_deployment_env_name, llm_deployment.id)
 pulumi.export(

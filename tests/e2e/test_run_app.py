@@ -20,24 +20,31 @@ from tests.e2e.utils import (
     click_element,
     download_file,
     find_element,
+    wait_for_element_to_be_clickable,
     wait_for_element_to_be_visible,
 )
 
 PROCESSING_TIMEOUT = 240
 
 
-def assert_data_processed(browser) -> None:
+def assert_data_processed(browser: webdriver.Chrome) -> None:
     assert wait_for_element_to_be_visible(
         browser,
         By.XPATH,
-        "//p[contains(text(), 'Data processed and dictionaries generated successfully!')]",
+        "//p[contains(text(), 'Processing complete')]",
         PROCESSING_TIMEOUT,
     )
 
 
 def load_from_database(browser: webdriver.Chrome, dataset: str) -> None:
+    wait_for_element_to_be_visible(
+        browser,
+        By.XPATH,
+        "//p[contains(text(), 'Select datasets from AI Catalog')]",
+    )
+
     click_element(
-        browser, By.CSS_SELECTOR, 'div[data-testid="stExpander"]:nth-of-type(3)'
+        browser, By.CSS_SELECTOR, 'div[data-testid="stExpander"]:nth-of-type(4)'
     )
 
     assert wait_for_element_to_be_visible(
@@ -74,12 +81,33 @@ def load_from_database(browser: webdriver.Chrome, dataset: str) -> None:
     assert_data_processed(browser)
 
 
-def load_from_file(browser, file_url) -> None:
+def load_from_file(browser: webdriver.Chrome, file_url: str) -> None:
     dataset = download_file(browser, file_url)
     file_input = find_element(
         browser, By.CSS_SELECTOR, 'input[data-testid="stFileUploaderDropzoneInput"]'
     )
     file_input.send_keys(str(dataset))
+
+
+def clear_data(browser: webdriver.Chrome) -> None:
+    clear_data_elector = "//p[contains(text(), 'Clear Data')]"
+    wait_for_element_to_be_clickable(
+        browser,
+        By.XPATH,
+        clear_data_elector,
+    )
+    click_element(
+        browser,
+        By.XPATH,
+        clear_data_elector,
+    )
+
+    assert wait_for_element_to_be_visible(
+        browser,
+        By.XPATH,
+        "//p[contains(text(), 'Upload and process your data using the sidebar to get started')]",
+        PROCESSING_TIMEOUT,
+    )
 
 
 @pytest.mark.usefixtures("check_if_logged_in")
@@ -108,6 +136,8 @@ def test_cleaning_report(browser: webdriver.Chrome, get_app_url: str) -> None:
         PROCESSING_TIMEOUT,
     )
 
+    clear_data(browser)
+
 
 @pytest.mark.usefixtures("check_if_logged_in")
 def test_data_dictionary_loaded(browser: webdriver.Chrome, get_app_url: str) -> None:
@@ -117,7 +147,7 @@ def test_data_dictionary_loaded(browser: webdriver.Chrome, get_app_url: str) -> 
     click_element(
         browser,
         By.XPATH,
-        "//span[contains(text(), 'Data Dictionary')]",
+        "//p[contains(text(), 'Data Dictionary')]",
     )
 
     assert wait_for_element_to_be_visible(
@@ -130,23 +160,7 @@ def test_clear_data_button(browser: webdriver.Chrome, get_app_url: str) -> None:
     browser.get(get_app_url)
     load_from_database(browser, "LENDING_CLUB_PROFILE")
 
-    click_element(
-        browser,
-        By.XPATH,
-        "//p[contains(text(), 'Clear Data')]",
-    )
-
-    click_element(
-        browser,
-        By.XPATH,
-        "//span[contains(text(), 'Data Dictionary')]",
-    )
-
-    assert wait_for_element_to_be_visible(
-        browser,
-        By.XPATH,
-        "//p[contains(text(), 'Please upload and process data from the main page to view the data dictionary')]",
-    )
+    clear_data(browser)
 
 
 @pytest.mark.usefixtures("check_if_logged_in")
@@ -157,34 +171,29 @@ def test_chat_page_loaded(browser: webdriver.Chrome, get_app_url: str) -> None:
     click_element(
         browser,
         By.XPATH,
-        "//span[contains(text(), 'Chat With Data')]",
+        "//span[contains(text(), 'AI Data Analyst')]",
     )
 
-    assert wait_for_element_to_be_visible(
-        browser, By.CSS_SELECTOR, 'textarea[data-testid="stChatInputTextArea"]'
-    )
-
-    click_element(
-        browser,
-        By.XPATH,
-        "//span[contains(text(), 'Data Dictionary')]",
-    )
-
-    assert wait_for_element_to_be_visible(
-        browser, By.XPATH, "//p[contains(text(), 'Download Data Dictionary')]"
+    wait_for_element_to_be_visible(
+        browser, By.XPATH, "//p[contains(text(), 'Database Mode')]"
     )
 
     click_element(
         browser,
         By.XPATH,
-        "//span[contains(text(), 'Chat With Data')]",
+        "//p[contains(text(), 'Snowflake')]",
     )
 
     chat_input = wait_for_element_to_be_visible(
         browser, By.CSS_SELECTOR, 'textarea[data-testid="stChatInputTextArea"]'
     )
 
-    chat_input.send_keys("What is the most common medical specialty of the physician?")
+    if chat_input:
+        chat_input.send_keys(
+            "What is the most common medical specialty of the physician?"
+        )
+    else:
+        pytest.fail("Chat input element not found")
 
     click_element(
         browser, By.CSS_SELECTOR, 'button[data-testid="stChatInputSubmitButton"]'

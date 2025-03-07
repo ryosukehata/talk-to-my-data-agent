@@ -15,16 +15,19 @@
 import ast
 import functools
 import io
-import logging
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from types import FunctionType, ModuleType
-from typing import Any, Awaitable, Callable, Type, TypeVar, cast
+from typing import Any, Awaitable, Callable, ParamSpec, Type, TypeVar, cast
 
+import pandas as pd
+import polars as pl
 from pydantic import BaseModel
 
-logger = logging.getLogger("PythonExecution")
+from utils.logging_helper import get_logger
+
+logger = get_logger("PythonExecutor")
 
 U = TypeVar("U")
 V = TypeVar("V", bound=BaseModel)
@@ -74,9 +77,13 @@ class MaxReflectionAttempts(Exception):
         self.duration = duration
 
 
+P = ParamSpec("P")  # For capturing all parameter types
+R = TypeVar("R")  # For capturing the return type
+
+
 def reflect_code_generation_errors(
     max_attempts: int,
-) -> Callable[[Callable[..., Awaitable[U]]], Callable[..., Awaitable[U]]]:
+) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Reflect LLM code generation errors for self-correction
 
     Exceptions raised by invalid code will be injected back into the
@@ -87,10 +94,10 @@ def reflect_code_generation_errors(
     """
 
     def _outer_wrapper(
-        f: Callable[..., Awaitable[U]],
-    ) -> Callable[..., Awaitable[U]]:
+        f: Callable[P, Awaitable[R]],
+    ) -> Callable[P, Awaitable[R]]:
         @functools.wraps(f)
-        async def _inner_wrapper(*args: Any, **kwargs: Any) -> U:
+        async def _inner_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             now = datetime.now()
 
             attempts = 1
@@ -167,7 +174,10 @@ def execute_python(
     functions: dict[str, Callable[..., Any]],
     expected_function: str,
     code: str,
-    input_data: Any,
+    input_data: pd.DataFrame
+    | dict[str, pd.DataFrame]
+    | pl.DataFrame
+    | dict[str, pl.DataFrame],
     output_type: Type[V],
     allowed_modules: set[str] | None = None,
 ) -> V:
@@ -177,6 +187,26 @@ def execute_python(
     """
     if allowed_modules is None:
         allowed_modules = set(modules.keys())
+
+    allowed_modules = allowed_modules.union(
+        {
+            "json",
+            "pandas",
+            "numpy",
+            "datetime",
+            "time",
+            "yaml",
+            "scipy",
+            "matplotlib",
+            "seaborn",
+            "plotly",
+            "openpyxl",
+            "xlsxwriter",
+            "pyspark",
+            "dask",
+            "polars",
+        }
+    )
 
     namespace = {**modules, **functions}
 

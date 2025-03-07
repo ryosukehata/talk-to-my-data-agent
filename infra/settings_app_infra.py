@@ -12,11 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import re
 import textwrap
 from typing import List, Sequence, Tuple
 
-import datarobot as dr
-import pulumi
 import pulumi_datarobot as datarobot
 from settings_database import DATABASE_CONNECTION_TYPE
 
@@ -28,37 +27,7 @@ application_path = PROJECT_ROOT / "frontend"
 
 app_source_args = ApplicationSourceArgs(
     resource_name=f"Data Analyst App Source [{project_name}]",
-    replicas=2,
 ).model_dump(mode="json", exclude_none=True)
-
-
-def ensure_app_settings(app_id: str) -> None:
-    try:
-        dr.client.get_client().patch(
-            f"customApplications/{app_id}/",
-            json={"allowAutoStopping": True},
-        )
-    except Exception:
-        pulumi.warn("Patching app unsuccessful.")
-    return
-
-
-def ensure_app_source_settings(source_id: str, version_id: str) -> str:
-    try:
-        dr.client.get_client().patch(
-            url=f"customApplicationSources/{source_id}/versions/{version_id}/",
-            json={
-                "resources": {
-                    "sessionAffinity": True,
-                    "resourceLabel": "cpu.xlarge",
-                    "replicas": 2,
-                }
-            },
-        )
-    except dr.errors.ClientError:
-        pulumi.warn("Patching app source unsuccessful.")
-    return version_id
-
 
 app_resource_name: str = f"Data Analyst Application [{project_name}]"
 
@@ -127,5 +96,14 @@ def get_app_files(
                 source_files.append(
                     (str(snowflake_file), credentials.snowflake_key_path)
                 )
+
+    EXCLUDE_PATTERNS = [re.compile(pattern) for pattern in [r".*\.pyc"]]
+    source_files = [
+        (file_path, file_name)
+        for file_path, file_name in source_files
+        if not any(
+            exclude_pattern.match(file_name) for exclude_pattern in EXCLUDE_PATTERNS
+        )
+    ]
 
     return source_files

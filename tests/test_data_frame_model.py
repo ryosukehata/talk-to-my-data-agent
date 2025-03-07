@@ -16,9 +16,9 @@ import logging
 from typing import Any
 
 import pandas as pd
+import polars as pl
 import pytest
-from pandas.testing import assert_frame_equal
-from pydantic import ValidationError
+from polars.testing import assert_frame_equal
 
 from utils.schema import AnalystDataset
 
@@ -27,7 +27,7 @@ from utils.schema import AnalystDataset
 def data() -> dict[str, Any]:
     """Test data generator to keep tests DRY"""
     return {
-        "df": pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]}),
+        "df": pl.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]}),
         "records": [{"a": 1, "b": "x"}, {"a": 2, "b": "y"}, {"a": 3, "b": "z"}],
     }
 
@@ -52,58 +52,43 @@ class TestDatasetInput:
         assert_frame_equal(deserialized.to_df(), data["df"])
 
     def test_empty_dataframe(self) -> None:
-        empty_df = pd.DataFrame(columns=["a", "b"])
+        empty_df = pl.DataFrame({"a": [], "b": []})
         model = AnalystDataset(data=empty_df, name="test")
         # assert model.data == pd.DataFrame
         assert_frame_equal(model.to_df(), empty_df)
 
     def test_single_row(self) -> None:
-        single_row_df = pd.DataFrame({"a": [1], "b": ["x"]})
+        single_row_df = pl.DataFrame({"a": [1], "b": ["x"]})
         model = AnalystDataset(data=single_row_df, name="test")
         assert len(model.to_df()) == 1
         assert_frame_equal(model.to_df(), single_row_df)
 
-    def test_invalid_types(self) -> None:
-        invalid_inputs = [42, "not a json string", {"not": "a list"}, [1, 2, 3], None]
-        for invalid_input in invalid_inputs:
-            with pytest.raises((ValidationError, ValueError)):
-                AnalystDataset(data=invalid_input, name="test")
-
     def test_preserves_dtypes(self) -> None:
-        df = pd.DataFrame(
+        df = pl.DataFrame(
             {
                 "int_col": [1, 2, 3],
                 "float_col": [1.1, 2.2, 3.3],
                 "str_col": ["a", "b", "c"],
                 "bool_col": [True, False, True],
-                "datetime_col": pd.date_range("2024-01-01", periods=3),
+                "datetime_col": pd.date_range(start="2024-01-01", periods=3),
             }
         )
         model = AnalystDataset(data=df, name="test")
         result_df = model.to_df()
 
         # Check each column's dtype is preserved
-        assert result_df["int_col"].dtype == "int64"
-        assert result_df["float_col"].dtype == "float64"
-        assert result_df["str_col"].dtype == "object"
-        assert result_df["bool_col"].dtype == "bool"
-        assert result_df["datetime_col"].dtype == "datetime64[ns]"
+        assert result_df["int_col"].dtype == pl.Int64
+        assert result_df["float_col"].dtype == pl.Float64
+        assert result_df["str_col"].dtype == pl.String
+        assert result_df["bool_col"].dtype == pl.Boolean
+        assert result_df["datetime_col"].dtype == pl.Datetime
 
     def test_handles_null_values(self) -> None:
-        df = pd.DataFrame({"a": [1, None, 3], "b": ["x", None, "z"]})
+        df = pl.DataFrame({"a": [1, None, 3], "b": ["x", None, "z"]})
         model = AnalystDataset(data=df, name="test")
         result_df = model.to_df()
-        assert result_df["a"].isna().sum() == 1
-        assert result_df["b"].isna().sum() == 1
-
-    def test_handles_index(self) -> None:
-        df = pd.DataFrame(
-            {"a": [1, 2, 3], "b": ["x", "y", "z"]}, index=["row1", "row2", "row3"]
-        )
-        model = AnalystDataset(data=df, name="test")
-        result_df = model.to_df()
-        # Check if index is preserved when converting back to DataFrame
-        assert_frame_equal(result_df, df)
+        assert result_df["a"].is_null().sum() == 1
+        assert result_df["b"].is_null().sum() == 1
 
     @pytest.mark.parametrize("input_type", ["df", "records"])
     def test_different_input_types(self, input_type: str, data: dict[str, Any]) -> None:

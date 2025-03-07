@@ -23,8 +23,10 @@ from typing import Callable
 import datarobot as dr
 import pandas as pd
 import pytest
+import pytest_asyncio
 from dotenv import dotenv_values
 
+from utils.analyst_db import AnalystDB, DataSourceType
 from utils.resources import LLMDeployment
 from utils.schema import AnalystDataset
 
@@ -180,8 +182,8 @@ def url_mpg():
     return DATA_FILES["mpg"]
 
 
-@pytest.fixture(scope="module")
-def dataset_loaded(url_diabetes: str) -> AnalystDataset:
+@pytest_asyncio.fixture(scope="module")
+async def dataset_loaded(url_diabetes: str, analyst_db: AnalystDB) -> AnalystDataset:
     df = pd.read_csv(url_diabetes)
     # Replace non-JSON compliant values
     df = df.replace([float("inf"), -float("inf")], None)  # Replace infinity with None
@@ -192,4 +194,16 @@ def dataset_loaded(url_diabetes: str) -> AnalystDataset:
         name=os.path.splitext(os.path.basename(url_diabetes))[0],
         data=df,
     )
+    await analyst_db.register_dataset(dataset, data_source=DataSourceType.FILE)
     return dataset
+
+
+@pytest_asyncio.fixture(scope="module")
+async def analyst_db() -> AnalystDB:
+    analyst_db = await AnalystDB.create(
+        user_id="test_user_123",
+        db_path=".",
+        dataset_db_name="datasets",
+        chat_db_name="chats",
+    )
+    return analyst_db

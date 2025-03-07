@@ -175,3 +175,9 @@ frontend/app_infra.json
 
 #e2e
 e2e/downloads/
+
+*.db*
+*.p8
+.env*
+!.env.template
+node_modules/

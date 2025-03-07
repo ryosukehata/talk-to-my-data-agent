@@ -23,8 +23,6 @@ from typing import Any, Callable, cast
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from utils.schema import DataDictionary
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -57,7 +55,7 @@ def application(
         sys.path.append(".")
         logger.info(subprocess.check_output(["pulumi", "stack", "output"]))
 
-        yield AppTest.from_file("Connect & Explore.py", default_timeout=180)
+        yield AppTest.from_file("01_connect_and_explore.py", default_timeout=180)
 
 
 @pytest.fixture
@@ -72,14 +70,20 @@ def app_post_database_load(application: AppTest, pulumi_up: Any) -> AppTest:
 
 
 def test_database_queried(app_post_database_load: AppTest) -> None:
-    success_message = "Data processed and dictionaries generated successfully!"
-    assert app_post_database_load.toast[0].value == success_message
+    success_message = "Processing complete"
+    assert app_post_database_load.toast[-1].value == success_message
 
 
-def test_data_dictionary_generated(app_post_database_load: AppTest) -> None:
-    dictionaries = cast(
-        list[DataDictionary], app_post_database_load.session_state.data_dictionaries
-    )
+def test_data_dictionary_generated(
+    app_post_database_load: AppTest,
+) -> None:
+    names = cast(list[str], app_post_database_load.session_state.datasets_names)
+    dictionaries = []
+
+    for name in names:
+        dictionaries.append(
+            app_post_database_load.session_state.analyst_db.get_data_dictionary(name)
+        )
     for dictionary in dictionaries:
         column_decriptions = dictionary.column_descriptions
         logger.info(column_decriptions)

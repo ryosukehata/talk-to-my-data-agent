@@ -15,10 +15,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Generator, Literal
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Callable, Generator, Literal, Union
 
 import pandas as pd
 import plotly.graph_objects as go
+import polars as pl
 from openai.types.chat.chat_completion_assistant_message_param import (
     ChatCompletionAssistantMessageParam,
 )
@@ -40,7 +43,7 @@ from pydantic import (
     model_validator,
 )
 
-from utils.code_execution import MaxReflectionAttempts
+from .code_execution import MaxReflectionAttempts
 
 
 class LLMDeploymentSettings(BaseModel):
@@ -56,13 +59,13 @@ class AiCatalogDataset(BaseModel):
 
 
 class DataFrameWrapper:
-    def __init__(self, df: pd.DataFrame) -> None:
+    def __init__(self, df: pl.DataFrame) -> None:
         self.df = df
 
     def to_dict(self) -> list[dict[str, Any]]:
-        records = self.df.to_dict(orient="records")
-        records_str = [{str(k): v for k, v in record.items()} for record in records]
-        return records_str
+        records = self.df.to_dicts()
+        # records_str = [{str(k): v for k, v in record.items()} for record in records]
+        return records
 
     @classmethod
     def __get_validators__(
@@ -76,10 +79,16 @@ class DataFrameWrapper:
         if isinstance(v, cls):
             return v
         if isinstance(v, pd.DataFrame):
+            for c in v.columns:
+                if "period" in str(v[c].dtype):
+                    v[c] = v[c].astype(str)
+            df = pl.DataFrame._from_pandas(v)
+            return cls(df)
+        if isinstance(v, pl.DataFrame):
             return cls(v)
         elif isinstance(v, list):
             try:
-                df = pd.DataFrame.from_records(v)
+                df = pl.DataFrame(v)
                 return cls(df)
             except Exception as e:
                 raise ValueError(
@@ -106,7 +115,7 @@ class AnalystDataset(BaseModel):
     # The internal data field stores the DataFrame wrapped in DataFrameWrapper.
     # It is excluded from the output and from the OpenAPI schema.
     data: DataFrameWrapper = Field(
-        default_factory=lambda: DataFrameWrapper(pd.DataFrame()),
+        default_factory=lambda: DataFrameWrapper(pl.DataFrame()),
         exclude=True,
         description="Internal field storing the pandas DataFrame",
     )
@@ -133,7 +142,7 @@ class AnalystDataset(BaseModel):
         if "data" not in values and "data_records" in values:
             try:
                 records = values["data_records"]
-                df = pd.DataFrame.from_records(records)
+                df = pl.DataFrame(records)
                 # Wrap the DataFrame before storing it.
                 values["data"] = DataFrameWrapper(df)
             except Exception as e:
@@ -142,13 +151,13 @@ class AnalystDataset(BaseModel):
                 ) from e
         return values
 
-    def to_df(self) -> pd.DataFrame:
+    def to_df(self) -> pl.DataFrame:
         """Return the internal pandas DataFrame."""
         return self.data.df
 
     @property
     def columns(self) -> list[str]:
-        return self.data.df.columns.tolist()
+        return self.data.df.columns
 
 
 class CleansedColumnReport(BaseModel):
@@ -169,7 +178,7 @@ class CleansedDataset(BaseModel):
     def name(self) -> str:
         return self.dataset.name
 
-    def to_df(self) -> pd.DataFrame:
+    def to_df(self) -> pl.DataFrame:
         return self.dataset.to_df()
 
 
@@ -186,7 +195,7 @@ class DataDictionary(BaseModel):
     @classmethod
     def from_analyst_df(
         cls,
-        df: pd.DataFrame,
+        df: pl.DataFrame,
         name: str = "analysis_result",
         column_descriptions: str = "Analysis result column",
     ) -> "DataDictionary":
@@ -204,7 +213,7 @@ class DataDictionary(BaseModel):
 
     @classmethod
     def from_application_df(
-        cls, df: pd.DataFrame, name: str = "analysis_result"
+        cls, df: pl.DataFrame, name: str = "analysis_result"
     ) -> "DataDictionary":
         columns = {"column", "description", "data_type"}
         if not columns.issubset(df.columns):
@@ -216,13 +225,13 @@ class DataDictionary(BaseModel):
                 description=row["description"],
                 data_type=row["data_type"],
             )
-            for _, row in df.iterrows()
+            for row in df.rows(named=True)
         ]
 
         return DataDictionary(name=name, column_descriptions=column_descriptions)
 
-    def to_application_df(self) -> pd.DataFrame:
-        return pd.DataFrame(
+    def to_application_df(self) -> pl.DataFrame:
+        return pl.DataFrame(
             {
                 "column": [c.column for c in self.column_descriptions],
                 "description": [c.description for c in self.column_descriptions],
@@ -293,10 +302,18 @@ class DictionaryGeneration(BaseModel):
         return dict(zip(self.columns, self.descriptions))
 
 
-class RunAnalysisRequest(BaseModel):
-    datasets: list[AnalystDataset]
-    dictionaries: list[DataDictionary]
+@dataclass
+class RunAnalysisRequest:
+    dataset_names: list[str]
     question: str
+
+
+class RunAnalysisResult(BaseModel):
+    type: Literal["analysis"] = "analysis"
+    status: Literal["success", "error"]
+    metadata: RunAnalysisResultMetadata
+    dataset: AnalystDataset | None = None
+    code: str | None = None
 
 
 class RunAnalysisResultMetadata(BaseModel):
@@ -308,11 +325,31 @@ class RunAnalysisResultMetadata(BaseModel):
     exception: AnalysisError | None = None
 
 
-class RunAnalysisResult(BaseModel):
-    status: Literal["success", "error"]
-    metadata: RunAnalysisResultMetadata
-    dataset: AnalystDataset | None = None
-    code: str | None = None
+class AnalysisError(BaseModel):
+    exception_history: list[CodeExecutionError] | None = None
+
+    @classmethod
+    def from_max_reflection_exception(
+        cls,
+        exception: MaxReflectionAttempts,
+    ) -> "AnalysisError":
+        return AnalysisError(
+            exception_history=(
+                [
+                    CodeExecutionError(
+                        exception_str=str(exception.exception),
+                        traceback_str=exception.traceback_str,
+                        code=exception.code,
+                        stdout=exception.stdout,
+                        stderr=exception.stderr,
+                    )
+                    for exception in exception.exception_history
+                    if exception is not None
+                ]
+                if exception.exception_history is not None
+                else None
+            ),
+        )
 
 
 class CodeExecutionError(BaseModel):
@@ -323,29 +360,11 @@ class CodeExecutionError(BaseModel):
     traceback_str: str | None = None
 
 
-class AnalysisError(BaseModel):
-    exception_history: list[CodeExecutionError] | None = None
-
-    @classmethod
-    def from_max_reflection_exception(
-        cls,
-        exception: MaxReflectionAttempts,
-    ) -> "AnalysisError":
-        return AnalysisError(
-            exception_history=[
-                CodeExecutionError(
-                    exception_str=str(exception.exception),
-                    traceback_str=exception.traceback_str,
-                    code=exception.code,
-                    stdout=exception.stdout,
-                    stderr=exception.stderr,
-                )
-                for exception in exception.exception_history
-                if exception is not None
-            ]
-            if exception.exception_history is not None
-            else None,
-        )
+class RunDatabaseAnalysisResult(BaseModel):
+    status: Literal["success", "error"]
+    metadata: RunDatabaseAnalysisResultMetadata
+    dataset: AnalystDataset | None = None
+    code: str | None = None
 
 
 class RunDatabaseAnalysisResultMetadata(BaseModel):
@@ -354,13 +373,6 @@ class RunDatabaseAnalysisResultMetadata(BaseModel):
     datasets_analyzed: int | None = None
     total_columns_analyzed: int | None = None
     exception: AnalysisError | None = None
-
-
-class RunDatabaseAnalysisResult(BaseModel):
-    status: Literal["success", "error"]
-    metadata: RunDatabaseAnalysisResultMetadata
-    dataset: AnalystDataset | None = None
-    code: str | None = None
 
 
 class ChartGenerationExecutionResult(BaseModel):
@@ -376,6 +388,7 @@ class RunChartsRequest(BaseModel):
 
 
 class RunChartsResult(BaseModel):
+    type: Literal["charts"] = "charts"
     status: Literal["success", "error"]
     fig1_json: str | None = None
     fig2_json: str | None = None
@@ -406,6 +419,7 @@ class BusinessAnalysisGeneration(BaseModel):
 
 
 class GetBusinessAnalysisResult(BaseModel):
+    type: Literal["business"] = "business"
     status: Literal["success", "error"]
     bottom_line: str
     additional_insights: str
@@ -442,8 +456,8 @@ class ValidatedQuestion(BaseModel):
 
 
 class RunDatabaseAnalysisRequest(BaseModel):
-    datasets: list[AnalystDataset]
-    dictionaries: list[DataDictionary]
+    type: Literal["database"] = "database"
+    dataset_names: list[str]
     question: str = Field(min_length=1)
 
 
@@ -485,16 +499,20 @@ class Tool(BaseModel):
         return f"function: {self.name}{self.signature}\n{self.docstring}\n\n"
 
 
+Component = Union[
+    RunAnalysisResult,
+    RunChartsResult,
+    GetBusinessAnalysisResult,
+    EnhancedQuestionGeneration,
+    RunDatabaseAnalysisResult,
+    str,
+]
+
+
 class AnalystChatMessage(BaseModel):
     role: UserRoleType
     content: str
-    components: list[
-        RunAnalysisResult
-        | RunChartsResult
-        | GetBusinessAnalysisResult
-        | EnhancedQuestionGeneration
-        | RunDatabaseAnalysisResult
-    ]
+    components: list[Component]
 
     def to_openai_message_param(self) -> ChatCompletionMessageParam:
         if self.role == "user":
@@ -507,3 +525,39 @@ class AnalystChatMessage(BaseModel):
             return ChatCompletionSystemMessageParam(
                 role=self.role, content=self.content
             )
+
+
+class ChatJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder to handle special types."""
+
+    def default(self, obj: Any) -> Any:
+        try:
+            if isinstance(obj, pd.Period):
+                return str(obj)
+            if isinstance(obj, pd.Timestamp):
+                return obj.isoformat()
+            if hasattr(obj, "dtype"):
+                return obj.item()
+            if hasattr(obj, "model_dump"):
+                return obj.model_dump()
+            if hasattr(obj, "to_dict"):
+                return obj.to_dict()
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            return super().default(obj)
+        except TypeError:
+            return str(obj)  # Fallback to string representation
+
+
+class ChatHistory(BaseModel):
+    user_id: str
+    chat_name: str
+    chat_messages: list[AnalystChatMessage]
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+    model_config = ConfigDict(
+        json_encoders={
+            datetime: lambda v: v.isoformat(),
+        }
+    )

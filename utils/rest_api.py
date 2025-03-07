@@ -14,20 +14,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
+from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+
+from utils.analyst_db import AnalystDB
 
 sys.path.append("..")
 
 from utils.api import (
-    cleanse_dataframes,
+    cleanse_dataframe,
     download_catalog_datasets,
     get_business_analysis,
-    get_dictionaries,
+    get_dictionary,
     list_catalog_datasets,
     rephrase_message,
     run_analysis,
@@ -52,6 +56,31 @@ from utils.schema import (
     RunDatabaseAnalysisResult,
     ValidatedQuestion,
 )
+
+analyst_db: AnalystDB | None = None
+init_lock = asyncio.Lock()
+
+
+# Your provided database initialization function
+async def get_database(user_id: str) -> AnalystDB:
+    analyst_db = await AnalystDB.create(
+        user_id=user_id,
+        db_path=Path("/tmp"),
+        dataset_db_name="datasets.db",
+        chat_db_name="chat.db",
+    )
+    return analyst_db
+
+
+# Dependency to provide the initialized database
+async def get_initialized_db() -> AnalystDB:
+    if analyst_db is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Database not initialized. Please call /initialize first.",
+        )
+    return analyst_db
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -86,6 +115,17 @@ app.add_middleware(
 )
 
 
+# Initialization endpoint to set up the database with user_id
+@app.post("/initialize")
+async def initialize_database(user_id: str) -> dict[str, str]:
+    global analyst_db
+    async with init_lock:
+        if analyst_db is not None:
+            return {"message": "Database already initialized"}
+        analyst_db = await get_database(user_id)
+    return {"message": "Database initialized"}
+
+
 # Add custom OpenAPI schema
 def custom_openapi() -> dict[str, Any]:
     if app.openapi_schema:
@@ -115,11 +155,11 @@ async def list_catalog_datasets_endpoint(limit: int = 100) -> list[AiCatalogData
     return list_catalog_datasets(limit)
 
 
-@app.get("/download_catalog_datasets")
+@app.post("/download_catalog_datasets")
 async def download_catalog_datasets_endpoint(
-    dataset_ids: list[str],
-) -> list[AnalystDataset]:
-    return download_catalog_datasets(*dataset_ids)
+    dataset_ids: list[str], analyst_db: AnalystDB = Depends(get_initialized_db)
+) -> list[str]:
+    return await download_catalog_datasets(dataset_ids, analyst_db=analyst_db)
 
 
 @app.get("/get_database_tables")
@@ -129,23 +169,27 @@ async def get_database_tables_endpoint() -> list[str]:
 
 @app.get("/get_database_data")
 async def get_database_data_endpoint(
-    table_names: list[str], sample_size: int = 5000
-) -> list[AnalystDataset]:
-    return Database.get_data(*table_names, sample_size=sample_size)
+    table_names: list[str],
+    analyst_db: AnalystDB = Depends(get_initialized_db),
+    sample_size: int = 5000,
+) -> list[str]:
+    return await Database.get_data(
+        *table_names, analyst_db=analyst_db, sample_size=sample_size
+    )
 
 
-@app.post("/cleanse_dataframes")
+@app.post("/cleanse_dataframe")
 async def cleanse_dataframes_endpoint(
-    datasets: list[AnalystDataset],
-) -> list[CleansedDataset]:
-    return await cleanse_dataframes(datasets)
+    dataset: AnalystDataset,
+) -> CleansedDataset:
+    return await cleanse_dataframe(dataset)
 
 
 @app.post("/get_dictionary")
 async def get_dictionaries_endpoint(
-    datasets: list[AnalystDataset],
-) -> list[DataDictionary]:
-    return await get_dictionaries(datasets)
+    dataset: AnalystDataset,
+) -> DataDictionary:
+    return await get_dictionary(dataset)
 
 
 @app.post("/suggest_questions")
@@ -173,12 +217,15 @@ async def rephrase_message_endpoint(request: ChatRequest) -> str:
 
 
 @app.post("/run_analysis")
-async def run_analysis_endpoint(request: RunAnalysisRequest) -> RunAnalysisResult:
-    return await run_analysis(request)
+async def run_analysis_endpoint(
+    request: RunAnalysisRequest, analyst_db: AnalystDB = Depends(get_initialized_db)
+) -> RunAnalysisResult:
+    return await run_analysis(request=request, analyst_db=analyst_db)
 
 
 @app.post("/run_database_analysis")
 async def run_database_analysis_endpoint(
     request: RunDatabaseAnalysisRequest,
+    analyst_db: AnalystDB = Depends(get_initialized_db),
 ) -> RunDatabaseAnalysisResult:
-    return await run_database_analysis(request=request)
+    return await run_database_analysis(request=request, analyst_db=analyst_db)

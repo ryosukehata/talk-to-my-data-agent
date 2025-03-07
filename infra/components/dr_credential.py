@@ -443,6 +443,7 @@ def get_database_credentials(
                 )
                 bq_con = google.cloud.bigquery.Client(credentials=google_credentials)
                 bq_con.close()  # type: ignore
+            return credentials
 
     except pydantic.ValidationError as exc:
         msg = "Validation errors in database credentials. Using no database configuration.\n"

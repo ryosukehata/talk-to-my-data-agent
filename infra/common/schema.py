@@ -184,7 +184,6 @@ class ApplicationSourceArgs(BaseModel):
     files: Optional[Any] = None
     folder_path: Optional[str] = None
     name: Optional[str] = None
-    replicas: Optional[int] = None
 
 
 class PlaygroundArgs(BaseModel):

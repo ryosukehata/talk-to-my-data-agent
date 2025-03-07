@@ -20,7 +20,7 @@ import pulumi_datarobot as datarobot
 
 from utils.schema import LLMDeploymentSettings
 
-from .common.globals import GlobalLLM
+from .common.globals import GlobalLLM, GlobalRuntimeEnvironment
 from .common.schema import (
     CustomModelArgs,
     DeploymentArgs,
@@ -38,6 +38,7 @@ custom_model_args = CustomModelArgs(
     target_name=LLMDeploymentSettings().target_feature_name,
     target_type=dr.enums.TARGET_TYPE.TEXT_GENERATION,
     replicas=2,
+    base_environment_id=GlobalRuntimeEnvironment.PYTHON_312_MODERATIONS.value.id,
     opts=pulumi.ResourceOptions(delete_before_replace=True),
 )
 
