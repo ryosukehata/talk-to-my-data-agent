@@ -149,8 +149,8 @@ except ValidationError as e:
         "If running in DataRobot, verify your runtime parameters have been set correctly."
     ) from e
 
-ALTERNATIVE_LLM_BIG = "gpt-4o"
-ALTERNATIVE_LLM_SMALL = "gpt-4o-mini"
+ALTERNATIVE_LLM_BIG = "datarobot-deployed-llm"
+ALTERNATIVE_LLM_SMALL = "datarobot-deployed-llm"
 DICTIONARY_BATCH_SIZE = 10
 MAX_AI_CATALOG_DATASET_SIZE = 400e6  # aligns to 400MB set in streamlit config.toml
 DISK_CACHE_LIMIT_BYTES = 512e6
@@ -261,7 +261,9 @@ async def download_catalog_datasets(
             continue
     names = []
     for result_dataset in result_datasets:
-        await analyst_db.register_dataset(result_dataset, DataSourceType.CATALOG)
+        await analyst_db.register_dataset(
+            result_dataset, DataSourceType.CATALOG, dataset.size or 0
+        )
         names.append(result_dataset.name)
     return names
 
@@ -1319,12 +1321,10 @@ async def run_complete_analysis(
     data_source: DataSourceType,
     datasets_names: list[str],
     analyst_db: AnalystDB,
-    current_chat_name: str,
+    chat_id: str,
     enable_chart_generation: bool = True,
     enable_business_insights: bool = True,
 ) -> AsyncGenerator[Component | AnalysisGenerationError, None]:
-    # current_chat_content = await analyst_db.get_chat(current_chat_name) or []
-
     # Get enhanced message
     try:
         logger.info("Getting rephrased question...")
@@ -1339,9 +1339,18 @@ async def run_complete_analysis(
         content=enhanced_message,
         components=[EnhancedQuestionGeneration(enhanced_user_message=enhanced_message)],
     )
+    messages = await analyst_db.get_chat_messages(chat_id=chat_id)
+    if messages:
+        user_message = messages[-1]
+        user_message.in_progress = False
+    await analyst_db.update_chat(
+        chat_message=user_message,
+        chat_id=chat_id,
+        mode="overwrite",
+    )
     await analyst_db.update_chat(
         chat_message=assistant_message,
-        chat_name=current_chat_name,
+        chat_id=chat_id,
         mode="append",
     )
     # Run main analysis
@@ -1374,8 +1383,14 @@ async def run_complete_analysis(
         logger.info("Getting analysis result done")
 
         if isinstance(analysis_result, BaseException):
-            yield AnalysisGenerationError(
-                f"Error running initial analysis. Try rephrasing: {str(analysis_result)}"
+            error_message = f"Error running initial analysis. Try rephrasing: {str(analysis_result)}"
+
+            yield AnalysisGenerationError(error_message)
+
+            await analyst_db.update_chat(
+                chat_message=assistant_message,
+                chat_id=chat_id,
+                mode="overwrite",
             )
             return
 
@@ -1383,13 +1398,19 @@ async def run_complete_analysis(
         assistant_message.components.append(analysis_result)
         await analyst_db.update_chat(
             chat_message=assistant_message,
-            chat_name=current_chat_name,
+            chat_id=chat_id,
             mode="overwrite",
         )
 
     except Exception as e:
-        yield AnalysisGenerationError(
-            f"Error running initial analysis. Try rephrasing: {str(e)}"
+        error_message = f"Error running initial analysis. Try rephrasing: {str(e)}"
+
+        yield AnalysisGenerationError(error_message)
+
+        await analyst_db.update_chat(
+            chat_message=assistant_message,
+            chat_id=chat_id,
+            mode="overwrite",
         )
         return
 
@@ -1412,31 +1433,58 @@ async def run_complete_analysis(
 
         # Handle chart results
         if isinstance(charts_result, BaseException):
-            yield AnalysisGenerationError("Error generating charts")
+            error_message = "Error generating charts"
+
+            yield AnalysisGenerationError(error_message)
+
+            await analyst_db.update_chat(
+                chat_message=assistant_message,
+                chat_id=chat_id,
+                mode="overwrite",
+            )
+
         elif charts_result is not None:
             yield charts_result
             assistant_message.components.append(charts_result)
             await analyst_db.update_chat(
                 chat_message=assistant_message,
-                chat_name=current_chat_name,
+                chat_id=chat_id,
                 mode="overwrite",
             )
 
         # Handle business analysis results
         if isinstance(business_result, BaseException):
+            error_message = "Error generating business insights"
+
             yield AnalysisGenerationError("Error generating business insights")
-        elif business_result is not None:
-            yield business_result
-            assistant_message.components.append(business_result)
 
             await analyst_db.update_chat(
                 chat_message=assistant_message,
-                chat_name=current_chat_name,
+                chat_id=chat_id,
+                mode="overwrite",
+            )
+        elif business_result is not None:
+            yield business_result
+            assistant_message.components.append(business_result)
+            assistant_message.in_progress = False
+
+            await analyst_db.update_chat(
+                chat_message=assistant_message,
+                chat_id=chat_id,
                 mode="overwrite",
             )
 
     except Exception as e:
-        yield AnalysisGenerationError(f"Error setting up additional analysis: {str(e)}")
+        error_message = f"Error setting up additional analysis: {str(e)}"
+
+        yield AnalysisGenerationError(error_message)
+
+        assistant_message.in_progress = False
+        await analyst_db.update_chat(
+            chat_message=assistant_message,
+            chat_id=chat_id,
+            mode="overwrite",
+        )
 
 
 async def process_data_and_update_state(

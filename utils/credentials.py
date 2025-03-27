@@ -219,5 +219,49 @@ class SnowflakeCredentials(DRCredentials):
         return has_key_auth or has_password_auth
 
 
+class SAPDatasphereCredentials(DRCredentials):
+    """
+    Credentials for connecting to SAP Data Sphere.
+    """
+
+    host: str = Field(
+        validation_alias=AliasChoices(
+            AliasPath("MLOPS_RUNTIME_PARAM_SAP_DATASPHERE_HOST"),
+            "SAP_DATASPHERE_HOST",
+        ),
+    )
+    port: int = Field(
+        default=443,
+        validation_alias=AliasChoices(
+            AliasPath("MLOPS_RUNTIME_PARAM_SAP_DATASPHERE_PORT"),
+            "SAP_DATASPHERE_PORT",
+        ),
+    )
+    user: str = Field(
+        validation_alias=AliasChoices(
+            AliasPath("MLOPS_RUNTIME_PARAM_db_credential", "payload", "username"),
+            "SAP_DATASPHERE_USER",
+        ),
+    )
+    password: str = Field(
+        validation_alias=AliasChoices(
+            AliasPath("MLOPS_RUNTIME_PARAM_db_credential", "payload", "password"),
+            "SAP_DATASPHERE_PASSWORD",
+        ),
+    )
+    db_schema: str = Field(
+        validation_alias=AliasChoices(
+            AliasPath("MLOPS_RUNTIME_PARAM_SAP_DATASPHERE_SCHEMA"),
+            "SAP_DATASPHERE_SCHEMA",
+        ),
+    )
+
+    def is_configured(self) -> bool:
+        """
+        Check if SAP Data Sphere credentials are properly configured.
+        """
+        return bool(self.host and self.port and self.user and self.password)
+
+
 class NoDatabaseCredentials(DRCredentials):
     pass

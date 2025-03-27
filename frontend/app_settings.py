@@ -42,6 +42,8 @@ def get_database_logo(app_infra: AppInfra) -> None:
         st.image("./Snowflake.svg", width=100)
     elif app_infra.database == "bigquery":
         st.image("./Google_Cloud.svg", width=100)
+    elif app_infra.database == "sap":
+        st.image("./sap.svg", width=100)
     return None
 
 
@@ -50,6 +52,8 @@ def get_database_loader_message(app_infra: AppInfra) -> str:
         return "Load Datasets from Snowflake"
     elif app_infra.database == "bigquery":
         return "Load Datasets from BigQuery"
+    elif app_infra.database == "sap":
+        return "Load Datasets from SAP"
     return "No database available"
 
 

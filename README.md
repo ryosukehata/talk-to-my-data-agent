@@ -113,12 +113,20 @@ Your data privacy is important to us. Data handling is governed by the DataRobot
 
 1. Modify the `LLM` setting in `infra/settings_generative.py` by changing `LLM=GlobalLLM.AZURE_OPENAI_GPT_4_O` to any other LLM from the `GlobalLLM` object. 
      - Trial users: Please set `LLM=GlobalLLM.AZURE_OPENAI_GPT_4_O_MINI` since GPT-4o is not supported in the trial. Use the `OPENAI_API_DEPLOYMENT_ID` in `.env` to override which model is used in your azure organisation. You'll still see GPT 4o-mini in the playground, but the deployed app will use the provided azure deployment.  
-2. Provide the required credentials in `.env` dependent on your choice.
-3. Run `pulumi up` to update your stack (Or rerun your quickstart).
+2. To use an existing TextGen model or deployment:
+      - In `infra/settings_generative.py`: Set `LLM=GlobalLLM.DEPLOYED_LLM`.
+      - In `.env`: Set either the `TEXTGEN_REGISTERED_MODEL_ID` or the `TEXTGEN_DEPLOYMENT_ID`
+      - In `.env`: Set `CHAT_MODEL_NAME` to the model name expected by the deployment (e.g. "claude-3-7-sonnet-20250219" for an anthropic deployment, "datarobot-deployed-llm" for NIM models ) 
+      - (Optional) In `utils/api.py`: `ALTERNATIVE_LLM_BIG` and `ALTERNATIVE_LLM_SMALL` can be used for fine-grained control over which LLM is used for different tasks.
+3. In `.env`: If not using an existing TextGen model or deployment, provide the required credentials dependent on your choice.
+4. Run `pulumi up` to update your stack (Or rerun your quickstart).
       ```bash
       source set_env.sh  # On windows use `set_env.bat`
       pulumi up
       ```
+
+> **⚠️ Availability information:**  
+> Using a NIM model requires custom model GPU inference, a premium feature. You will experience errors by using this type of model without the feature enabled. Contact your DataRobot representative or administrator for information on enabling this feature.
 
 ### Change the database
 
@@ -140,6 +148,16 @@ To add Snowflake support:
 The Talk to my Data Agent supports connecting to BigQuery.
 1. Modify the `DATABASE_CONNECTION_TYPE` setting in `infra/settings_database.py` by changing `DATABASE_CONNECTION_TYPE = "no_database"` to `DATABASE_CONNECTION_TYPE = "bigquery"`. 
 2. Provide the required google credentials in `.env` dependent on your choice.  Ensure that GOOGLE_DB_SCHEMA is also populated in `.env`.
+3. Run `pulumi up` to update your stack (Or rerun your quickstart).
+      ```bash
+      source set_env.sh  # On windows use `set_env.bat`
+      pulumi up
+      ```
+#### SAP Datasphere
+
+The Talk to my Data Agent supports connecting to SAP Datasphere.
+1. Modify the `DATABASE_CONNECTION_TYPE` setting in `infra/settings_database.py` by changing `DATABASE_CONNECTION_TYPE = "no_database"` to `DATABASE_CONNECTION_TYPE = "sap"`. 
+2. Provide the required SAP credentials in `.env`.
 3. Run `pulumi up` to update your stack (Or rerun your quickstart).
       ```bash
       source set_env.sh  # On windows use `set_env.bat`

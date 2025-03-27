@@ -21,10 +21,12 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 DOWNLOADS_FOLDER = Path(__file__).resolve().parent.absolute() / "downloads"
+PROCESSING_TIMEOUT = 240
+LOOKUP_TIMEOUT = 30
 
 
 def find_element(
-    browser: webdriver.Chrome, by: str, value: str, timeout: int = 10
+    browser: webdriver.Chrome, by: str, value: str, timeout: int = LOOKUP_TIMEOUT
 ) -> WebElement:
     """
     Find an element with a given locator.
@@ -41,7 +43,7 @@ def find_element(
 
 
 def click_element(
-    browser: webdriver.Chrome, by: str, value: str, timeout: int = 10
+    browser: webdriver.Chrome, by: str, value: str, timeout: int = LOOKUP_TIMEOUT
 ) -> None:
     """
     Click an element with a given locator.
@@ -57,7 +59,11 @@ def click_element(
 
 
 def enter_text(
-    browser: webdriver.Chrome, by: str, value: str, text: str, timeout: int = 10
+    browser: webdriver.Chrome,
+    by: str,
+    value: str,
+    text: str,
+    timeout: int = LOOKUP_TIMEOUT,
 ) -> None:
     """
     Enter text into an input field with a given locator.
@@ -74,7 +80,7 @@ def enter_text(
 
 
 def wait_for_element_to_be_clickable(
-    browser: webdriver.Chrome, by: str, value: str, timeout: int = 10
+    browser: webdriver.Chrome, by: str, value: str, timeout: int = LOOKUP_TIMEOUT
 ) -> WebElement:
     """
     Wait for an element to be clickable.
@@ -91,7 +97,7 @@ def wait_for_element_to_be_clickable(
 
 
 def get_element_text(
-    browser: webdriver.Chrome, by: str, value: str, timeout: int = 10
+    browser: webdriver.Chrome, by: str, value: str, timeout: int = LOOKUP_TIMEOUT
 ) -> str:
     """
     Get the text of an element with a given locator.
@@ -107,7 +113,7 @@ def get_element_text(
 
 
 def wait_for_element_to_be_visible(
-    browser: webdriver.Chrome, by: str, value: str, timeout: int = 10
+    browser: webdriver.Chrome, by: str, value: str, timeout: int = LOOKUP_TIMEOUT
 ) -> WebElement | None:
     """
     Wait for an element to be visible.

@@ -68,6 +68,7 @@ def clear_chat() -> None:
     st.session_state.current_chat_name = (
         f"New Chat {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     )
+    st.session_state.current_chat_id = None
 
 
 @dataclass
@@ -288,7 +289,7 @@ async def run_complete_analysis_st(
                 data_source=st.session_state.data_source,
                 datasets_names=selected_datasets,
                 analyst_db=st.session_state.analyst_db,
-                current_chat_name=st.session_state.current_chat_name,
+                chat_id=st.session_state.current_chat_id,
                 enable_chart_generation=st.session_state.enable_chart_generation,
                 enable_business_insights=st.session_state.enable_business_insights,
             )
@@ -325,8 +326,13 @@ if "all_chats" not in st.session_state:
     st.session_state.all_chats = {}
 if "current_chat_name" not in st.session_state:
     st.session_state.current_chat_name = None
+if "current_chat_id" not in st.session_state:
+    st.session_state.current_chat_id = None
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = []
+
+if "retries" not in st.session_state:
+    st.session_state.retries = 0
 
 
 async def main() -> None:
@@ -334,12 +340,17 @@ async def main() -> None:
     # Main page content (Chat Interface)
     display_page_logo()
     if "analyst_db" not in st.session_state:
+        st.session_state.retries += 1
+        if st.session_state.retries >= 5:
+            st.warning("Could not identify user, please provide your API token")
+            return
+        st.error("Failed to initialize the database connection.")
         time.sleep(1)
         st.rerun()
 
     analyst_db: AnalystDB = st.session_state.analyst_db
     # Sidebar UI
-    all_chats = await analyst_db.get_chat_names()
+    all_chats = await analyst_db.get_chat_list()
     if not st.session_state.data_source:
         all_datasets = []
     elif st.session_state.data_source == DataSourceType.DATABASE:
@@ -353,14 +364,14 @@ async def main() -> None:
 
     st.session_state.datasets_names = all_datasets
     if (
-        "current_chat_name" not in st.session_state
-        or st.session_state.current_chat_name is None
+        "current_chat_id" not in st.session_state
+        or st.session_state.current_chat_id is None
     ):
         clear_chat()
     else:
         try:
-            st.session_state.chat_messages = await analyst_db.get_chat(
-                st.session_state.current_chat_name
+            st.session_state.chat_messages = await analyst_db.get_chat_messages(
+                chat_id=st.session_state.current_chat_id
             )
         except Exception as e:
             logger.error(f"Error retrieving chat: {e}")
@@ -426,8 +437,13 @@ async def main() -> None:
                 type="secondary",
             ):
                 with status_container:
-                    await analyst_db.save_chat(
-                        chat_messages=st.session_state.chat_messages
+                    if not st.session_state.current_chat_id:
+                        st.session_state.current_chat_id = await analyst_db.create_chat(
+                            chat_name=st.session_state.current_chat_name
+                        )
+                    await analyst_db.chat_handler.update_chat(
+                        chat_id=st.session_state.current_chat_id,
+                        messages=st.session_state.chat_messages,
                     )
                     st.rerun()
 
@@ -436,63 +452,63 @@ async def main() -> None:
             st.write("No saved chats available.")
         else:
             st.subheader("Saved Chats")
-            for chat_name in all_chats:
+            for chat in all_chats:
+                chat_id = chat["id"]
+                chat_name = chat["name"]
                 with st.container():
                     # Create columns for name, load button, and delete
                     col1, col2, col3, col4 = st.columns([6, 1, 1, 1])
                     with col2:
                         if st.button(
                             "✎",  # Folder icon for load
-                            key=f"edit_{chat_name}",
+                            key=f"edit_{chat_id}",
                             use_container_width=True,
                         ):
                             st.session_state[
-                                f"name_{chat_name}_edit"
-                            ] = not st.session_state[f"name_{chat_name}_edit"]
+                                f"name_{chat_id}_edit"
+                            ] = not st.session_state[f"name_{chat_id}_edit"]
                     with col1:
-                        if f"name_{chat_name}_edit" not in st.session_state:
-                            st.session_state[f"name_{chat_name}_edit"] = True
+                        if f"name_{chat_id}_edit" not in st.session_state:
+                            st.session_state[f"name_{chat_id}_edit"] = True
 
                         new_name = st.text_input(
                             "name",
-                            value=chat_name,  # Current name as default value
-                            key=f"name_{chat_name}",
+                            value=chat["name"],  # Current name as default value
+                            key=f"name_{chat_id}",
                             label_visibility="collapsed",
-                            disabled=st.session_state.get(
-                                f"name_{chat_name}_edit", True
-                            ),
+                            disabled=st.session_state.get(f"name_{chat_id}_edit", True),
                             # Make it look like text until clicked
-                            placeholder=chat_name,
+                            placeholder=chat["name"],
                         )
-                        if new_name and new_name != chat_name:
+                        if new_name and new_name != chat["name"]:
                             with status_container:
-                                await analyst_db.rename_chat(chat_name, new_name)
-                                if st.session_state.current_chat_name == chat_name:
-                                    st.session_state.current_chat_name = new_name
+                                await analyst_db.rename_chat(chat["id"], new_name)
+                                st.session_state.current_chat_name = new_name
                                 st.rerun()
-                            st.session_state[f"name_{chat_name}_edit"] = True
+                            st.session_state[f"name_{chat_id}_edit"] = True
 
                     with col3:
                         if st.button(
                             "➡️",  # Folder icon for load
-                            key=f"load_{chat_name}",
+                            key=f"load_{chat_id}",
                             use_container_width=True,
                         ):
                             with status_container:
                                 st.session_state.chat_messages = (
-                                    await analyst_db.get_chat(chat_name)
+                                    await analyst_db.get_chat_messages(chat_id=chat_id)
                                 )
                                 st.session_state.current_chat_name = chat_name
+                                st.session_state.current_chat_id = chat_id
                                 st.rerun()
 
                     with col4:
                         if st.button(
                             "🗑️",
-                            key=f"delete_{chat_name}",
+                            key=f"delete_{chat_id}",
                             use_container_width=True,
                         ):
                             with status_container:
-                                await analyst_db.delete_chat(chat_name)
+                                await analyst_db.delete_chat(chat_id=chat_id)
                                 st.rerun()
 
         # Current chat info at the bottom
@@ -534,9 +550,13 @@ async def main() -> None:
             user_message = AnalystChatMessage(
                 role="user", content=question, components=[]
             )
+            if not st.session_state.current_chat_id:
+                st.session_state.current_chat_id = await analyst_db.create_chat(
+                    chat_name=st.session_state.current_chat_name
+                )
 
             await analyst_db.update_chat(
-                chat_name=st.session_state.current_chat_name,
+                chat_id=st.session_state.current_chat_id,
                 chat_message=user_message,
                 mode="append",
             )
@@ -567,8 +587,9 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    datarobot_connect = DataRobotTokenManager()
-    st.session_state.datarobot_connect = datarobot_connect
+    if "datarobot_connect" not in st.session_state:
+        datarobot_connect = DataRobotTokenManager()
+        st.session_state.datarobot_connect = datarobot_connect
 
     asyncio.run(main())
 else:

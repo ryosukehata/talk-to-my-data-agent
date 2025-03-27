@@ -14,14 +14,23 @@
 
 import json
 import os
+import sys
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Generator, Optional, cast
 
 import datarobot as dr
 import streamlit as st
+from helpers import state_init
 from streamlit.delta_generator import DeltaGenerator
 from streamlit_javascript import st_javascript
+
+sys.path.append("..")
+
+from utils.logging_helper import get_logger
+
+logger = get_logger("DR Connect")
 
 
 @dataclass
@@ -53,6 +62,7 @@ class DataRobotTokenManager:
     });"""
 
     def __init__(self) -> None:
+        logger.info("dr_connect_init")
         """Initialize the token manager and set up initial credentials."""
         self._original_creds = self._get_current_credentials()
         self._set_user_credentials()
@@ -67,6 +77,7 @@ class DataRobotTokenManager:
         """Fetch data from DataRobot API using JavaScript."""
         js_command = self._JS_COMMAND_TEMPLATE.replace("URL", url)
         result = st_javascript(js_command, key=url)
+        time.sleep(1)
         data = {}
         try:
             data = json.loads(result)
@@ -130,7 +141,7 @@ class DataRobotTokenManager:
             for k, v in user_info.items():
                 st.session_state[f"datarobot_{k}"] = v
 
-    def display_info(self, stc: DeltaGenerator) -> None:
+    async def display_info(self, stc: DeltaGenerator) -> None:
         # stc.subheader("DataRobot Connect", divider="rainbow")
         username = (
             st.session_state.get("datarobot_firstName", "")
@@ -141,13 +152,21 @@ class DataRobotTokenManager:
             stc.write(f"Hello {username}")
 
         if not self._user_creds.token:
-            stc.text_input(
+            token = stc.text_input(
                 "API Token",
                 key="datarobot_api_token_provided",
                 type="password",
                 placeholder="DataRobot API Token",
                 label_visibility="collapsed",
             )
+            if token:
+                logger.info(f"Setting Token {token}")
+                self._user_creds = DataRobotCredentials(
+                    token=token, endpoint=self._original_creds.endpoint
+                )
+                self._set_user_info()
+                await state_init()
+                st.rerun()
 
     @contextmanager
     def use_user_token(self) -> Generator[None, None, None]:

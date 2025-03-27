@@ -31,6 +31,7 @@ from utils.credentials import (
     DRCredentials,
     GoogleCredentials,
     NoDatabaseCredentials,
+    SAPDatasphereCredentials,
     SnowflakeCredentials,
 )
 from utils.schema import (
@@ -42,9 +43,11 @@ logger = logging.getLogger("DataAnalystFrontend")
 
 
 def get_credential_runtime_parameter_values(
-    credentials: DRCredentials,
+    credentials: DRCredentials | None,
     credential_type: RuntimeCredentialType = "llm",
 ) -> list[datarobot.CustomModelRuntimeParameterValueArgs]:
+    if credentials is None:
+        return []
     if isinstance(credentials, AzureOpenAICredentials):
         rtps: list[dict[str, Any]] = [
             {
@@ -160,6 +163,33 @@ def get_credential_runtime_parameter_values(
             },
         ]
         credential_rtp_dicts = [rtp for rtp in rtps if rtp["value"] is not None]
+    elif isinstance(credentials, SAPDatasphereCredentials):
+        rtps = [
+            {
+                "key": "db_credential",
+                "type": "basic_credential",
+                "value": {
+                    "user": credentials.user,
+                    "password": credentials.password,
+                },
+            },
+            {
+                "key": "SAP_DATASPHERE_HOST",
+                "type": "string",
+                "value": credentials.host,
+            },
+            {
+                "key": "SAP_DATASPHERE_PORT",
+                "type": "string",
+                "value": credentials.port,
+            },
+            {
+                "key": "SAP_DATASPHERE_SCHEMA",
+                "type": "string",
+                "value": credentials.db_schema,
+            },
+        ]
+        credential_rtp_dicts = [rtp for rtp in rtps if rtp["value"] is not None]
 
     credential_runtime_parameter_values: list[
         datarobot.CustomModelRuntimeParameterValueArgs
@@ -216,9 +246,13 @@ def get_credential_runtime_parameter_values(
 
 
 # Initialize the LLM client based on the selected LLM and its credential type
-def get_llm_credentials(llm: LLMConfig, test_credentials: bool = True) -> DRCredentials:
+def get_llm_credentials(
+    llm: LLMConfig, test_credentials: bool = True
+) -> DRCredentials | None:
     try:
         credentials: DRCredentials
+        if llm == GlobalLLM.DEPLOYED_LLM:
+            return None
         if llm.credential_type == "azure":
             credentials = AzureOpenAICredentials()
             if test_credentials:
@@ -383,8 +417,18 @@ def get_llm_credentials(llm: LLMConfig, test_credentials: bool = True) -> DRCred
 def get_database_credentials(
     database: DatabaseConnectionType,
     test_credentials: bool = True,
-) -> SnowflakeCredentials | GoogleCredentials | NoDatabaseCredentials:
-    credentials: SnowflakeCredentials | GoogleCredentials | NoDatabaseCredentials
+) -> (
+    SnowflakeCredentials
+    | GoogleCredentials
+    | SAPDatasphereCredentials
+    | NoDatabaseCredentials
+):
+    credentials: (
+        SnowflakeCredentials
+        | GoogleCredentials
+        | SAPDatasphereCredentials
+        | NoDatabaseCredentials
+    )
 
     try:
         if database == "no_database":
@@ -443,6 +487,25 @@ def get_database_credentials(
                 )
                 bq_con = google.cloud.bigquery.Client(credentials=google_credentials)
                 bq_con.close()  # type: ignore
+            return credentials
+        elif database == "sap":
+            credentials = SAPDatasphereCredentials()
+            if test_credentials:
+                from hdbcli import dbapi
+
+                connect_params = {
+                    "address": credentials.host,
+                    "port": credentials.port,
+                    "user": credentials.user,
+                    "password": credentials.password,
+                }
+
+                # Connect to SAP Data Sphere
+                try:
+                    connection = dbapi.connect(**connect_params)
+                    connection.close()
+                except Exception as e:
+                    raise ValueError("Failed to connect to SAP Data Sphere.") from e
             return credentials
 
     except pydantic.ValidationError as exc:

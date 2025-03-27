@@ -26,7 +26,7 @@ from infra import (
     settings_generative,
 )
 from infra.common.feature_flags import check_feature_flags
-from infra.common.globals import GlobalRuntimeEnvironment
+from infra.common.globals import GlobalLLM, GlobalRuntimeEnvironment
 from infra.common.stack import PROJECT_ROOT, project_name
 from infra.common.urls import get_deployment_url
 from infra.components.custom_model_deployment import CustomModelDeployment
@@ -35,8 +35,9 @@ from infra.components.dr_credential import (
     get_database_credentials,
     get_llm_credentials,
 )
-from infra.components.playground_custom_model import PlaygroundCustomModel
+from infra.components.proxy_llm_blueprint import ProxyLLMBlueprint
 from infra.settings_database import DATABASE_CONNECTION_TYPE
+from infra.settings_proxy_llm import CHAT_MODEL_NAME
 from utils.resources import (
     app_env_name,
     llm_deployment_env_name,
@@ -44,6 +45,18 @@ from utils.resources import (
 from utils.schema import (
     AppInfra,
 )
+
+TEXTGEN_DEPLOYMENT_ID = os.environ.get("TEXTGEN_DEPLOYMENT_ID")
+TEXTGEN_REGISTERED_MODEL_ID = os.environ.get("TEXTGEN_REGISTERED_MODEL_ID")
+
+
+if settings_generative.LLM == GlobalLLM.DEPLOYED_LLM:
+    pulumi.info(f"{TEXTGEN_DEPLOYMENT_ID=}")
+    pulumi.info(f"{TEXTGEN_REGISTERED_MODEL_ID=}")
+    if (TEXTGEN_DEPLOYMENT_ID is None) == (TEXTGEN_REGISTERED_MODEL_ID is None):  # XOR
+        raise ValueError(
+            "Either TEXTGEN_DEPLOYMENT_ID or TEXTGEN_REGISTERED_MODEL_ID must be set when using a deployed LLM. Plese check your .env file"
+        )
 
 check_feature_flags(
     pathlib.Path(PROJECT_ROOT / "infra" / "feature_flag_requirements.yaml")
@@ -81,15 +94,58 @@ llm_runtime_parameter_values = get_credential_runtime_parameter_values(
     llm_credential, "llm"
 )
 
-llm_custom_model = PlaygroundCustomModel(
-    resource_name=f"Chat Agent Buzok Deployment [{project_name}]",
-    use_case=use_case,
-    playground_args=settings_generative.playground_args,
-    llm_blueprint_args=settings_generative.llm_blueprint_args,
-    runtime_parameter_values=llm_runtime_parameter_values,
-    custom_model_args=settings_generative.custom_model_args,
+playground = datarobot.Playground(
+    use_case_id=use_case.id,
+    **settings_generative.playground_args.model_dump(),
 )
 
+if settings_generative.LLM == GlobalLLM.DEPLOYED_LLM:
+    if TEXTGEN_REGISTERED_MODEL_ID is not None:
+        proxy_llm_registered_model = datarobot.RegisteredModel.get(
+            resource_name="Existing TextGen Registered Model",
+            id=TEXTGEN_REGISTERED_MODEL_ID,
+        )
+
+        proxy_llm_deployment = datarobot.Deployment(
+            resource_name=f"Data Analyst LLM Deployment [{project_name}]",
+            registered_model_version_id=proxy_llm_registered_model.version_id,
+            prediction_environment_id=prediction_environment.id,
+            label=f"Data Analyst LLM Deployment [{project_name}]",
+            use_case_ids=[use_case.id],
+            opts=pulumi.ResourceOptions(
+                replace_on_changes=["registered_model_version_id"]
+            ),
+        )
+    elif TEXTGEN_DEPLOYMENT_ID is not None:
+        proxy_llm_deployment = datarobot.Deployment.get(
+            resource_name="Existing LLM Deployment", id=TEXTGEN_DEPLOYMENT_ID
+        )
+    else:
+        raise ValueError(
+            "Either TEXTGEN_REGISTERED_MODEL_ID or TEXTGEN_DEPLOYMENT_ID have to be set in `.env`"
+        )
+    llm_blueprint = ProxyLLMBlueprint(
+        use_case_id=use_case.id,
+        playground_id=playground.id,
+        proxy_llm_deployment_id=proxy_llm_deployment.id,
+        chat_model_name=CHAT_MODEL_NAME,
+        **settings_generative.llm_blueprint_args.model_dump(mode="python"),
+    )
+
+elif settings_generative.LLM != GlobalLLM.DEPLOYED_LLM:
+    llm_blueprint = datarobot.LlmBlueprint(  # type: ignore[assignment]
+        playground_id=playground.id,
+        **settings_generative.llm_blueprint_args.model_dump(),
+    )
+
+llm_custom_model = datarobot.CustomModel(
+    **settings_generative.custom_model_args.model_dump(exclude_none=True),
+    use_case_ids=[use_case.id],
+    source_llm_blueprint_id=llm_blueprint.id,
+    runtime_parameter_values=[]
+    if settings_generative.LLM == GlobalLLM.DEPLOYED_LLM
+    else llm_runtime_parameter_values,
+)
 
 llm_deployment = CustomModelDeployment(
     resource_name=f"Chat Agent Deployment [{project_name}]",
@@ -117,7 +173,6 @@ db_runtime_parameter_values = get_credential_runtime_parameter_values(
 )
 app_runtime_parameters += db_runtime_parameter_values  # type: ignore[arg-type]
 
-
 app_source = datarobot.ApplicationSource(
     files=settings_app_infra.get_app_files(
         runtime_parameter_values=app_runtime_parameters
@@ -125,9 +180,7 @@ app_source = datarobot.ApplicationSource(
     runtime_parameter_values=app_runtime_parameters,
     base_environment_id=GlobalRuntimeEnvironment.PYTHON_312_APPLICATION_BASE.value.id,
     resources=datarobot.ApplicationSourceResourcesArgs(
-        replicas=2,
         resource_label="cpu.xlarge",
-        session_affinity=True,
     ),
     **settings_app_infra.app_source_args,
 )

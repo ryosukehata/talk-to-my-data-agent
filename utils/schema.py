@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Callable, Generator, Literal, Union
+from datetime import datetime, timezone
+from typing import Any, Callable, Generator, Literal, Optional, TypedDict, Union
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -478,7 +478,7 @@ class CodeGeneration(BaseModel):
 RuntimeCredentialType = Literal["llm", "db"]
 
 
-DatabaseConnectionType = Literal["snowflake", "bigquery", "no_database"]
+DatabaseConnectionType = Literal["snowflake", "bigquery", "sap", "no_database"]
 
 
 class AppInfra(BaseModel):
@@ -513,6 +513,8 @@ class AnalystChatMessage(BaseModel):
     role: UserRoleType
     content: str
     components: list[Component]
+    in_progress: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_openai_message_param(self) -> ChatCompletionMessageParam:
         if self.role == "user":
@@ -539,7 +541,11 @@ class ChatJSONEncoder(json.JSONEncoder):
             if hasattr(obj, "dtype"):
                 return obj.item()
             if hasattr(obj, "model_dump"):
-                return obj.model_dump()
+                data = obj.model_dump()
+                if isinstance(obj, AnalystChatMessage) and "created_at" in data:
+                    if isinstance(data["created_at"], datetime):
+                        data["created_at"] = data["created_at"].isoformat()
+                return data
             if hasattr(obj, "to_dict"):
                 return obj.to_dict()
             if isinstance(obj, datetime):
@@ -553,11 +559,52 @@ class ChatHistory(BaseModel):
     user_id: str
     chat_name: str
     chat_messages: list[AnalystChatMessage]
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    data_source: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     model_config = ConfigDict(
         json_encoders={
             datetime: lambda v: v.isoformat(),
         }
     )
+
+
+class FileUploadResponse(TypedDict, total=False):
+    filename: str
+    content_type: Optional[str]
+    size: Optional[int]
+    dataset_name: Optional[str]
+    error: Optional[str]
+
+
+class ChatResponse(TypedDict):
+    id: str
+    messages: list[AnalystChatMessage]
+
+
+class DictionaryCellUpdate(BaseModel):
+    rowIndex: int
+    field: str
+    value: str
+
+
+class LoadDatabaseRequest(BaseModel):
+    table_names: list[str]
+
+
+class ChatCreate(BaseModel):
+    name: str
+    data_source: str = ""
+
+
+class ChatUpdate(BaseModel):
+    name: str = ""
+    data_source: str = ""
+
+
+class ChatMessagePayload(BaseModel):
+    message: str = ""
+    enable_chart_generation: bool = True
+    enable_business_insights: bool = True
+    data_source: str = "file"

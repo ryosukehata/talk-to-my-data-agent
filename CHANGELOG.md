@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.1.8] - 2025-03-27
+
+### Added
+- Support for NIMs
+- Support for existing TextGen deployments
+- SAP Datasphere support 
+
+### Fixed
+- AI Catalog and Database caching
+- Fix StreamlitDuplicateElementKey error
+
+### Changed
+- Disabled session affinity for application
+- Made REST API endpoints OpenAPI compliant
+- Better DR token handling
+
 ## [0.1.7] - 2025-03-07
 
 ### Added

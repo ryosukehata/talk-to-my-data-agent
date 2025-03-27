@@ -27,6 +27,7 @@ import pandas as pd
 import polars as pl
 import snowflake.connector
 from google.cloud import bigquery
+from hdbcli import dbapi
 from openai.types.chat.chat_completion_system_message_param import (
     ChatCompletionSystemMessageParam,
 )
@@ -37,10 +38,15 @@ from utils.code_execution import InvalidGeneratedCode
 from utils.credentials import (
     GoogleCredentials,
     NoDatabaseCredentials,
+    SAPDatasphereCredentials,
     SnowflakeCredentials,
 )
 from utils.logging_helper import get_logger
-from utils.prompts import SYSTEM_PROMPT_BIGQUERY, SYSTEM_PROMPT_SNOWFLAKE
+from utils.prompts import (
+    SYSTEM_PROMPT_BIGQUERY,
+    SYSTEM_PROMPT_SAP_DATASPHERE,
+    SYSTEM_PROMPT_SNOWFLAKE,
+)
 from utils.schema import (
     AnalystDataset,
     AppInfra,
@@ -60,6 +66,11 @@ class SnowflakeCredentialArgs:
 @dataclass
 class BigQueryCredentialArgs:
     credentials: GoogleCredentials
+
+
+@dataclass
+class SAPDatasphereCredentialArgs:
+    credentials: SAPDatasphereCredentials
 
 
 @dataclass
@@ -225,7 +236,6 @@ class SnowflakeOperator(DatabaseOperator[SnowflakeCredentialArgs]):
                 traceback_str=traceback.format_exc(),
             )
 
-    @functools.lru_cache(maxsize=1)
     def get_tables(self, timeout: int | None = None) -> list[str]:
         """Fetch list of tables from Snowflake schema"""
         timeout = timeout if timeout is not None else self.default_timeout
@@ -430,7 +440,6 @@ class BigQueryOperator(DatabaseOperator[BigQueryCredentialArgs]):
                 traceback_str=traceback.format_exc(),
             )
 
-    @functools.lru_cache(maxsize=1)
     def get_tables(self, timeout: int | None = None) -> list[str]:
         """Fetch list of tables from BigQuery schema"""
         timeout = timeout if timeout is not None else self.default_timeout
@@ -541,9 +550,230 @@ class BigQueryOperator(DatabaseOperator[BigQueryCredentialArgs]):
         )
 
 
+class SAPDatasphereOperator(DatabaseOperator[SAPDatasphereCredentialArgs]):
+    def __init__(
+        self,
+        credentials: SAPDatasphereCredentials,
+        default_timeout: int = _DEFAULT_DB_QUERY_TIMEOUT,
+    ):
+        if not credentials.is_configured():
+            raise ValueError("SAP Data Sphere credentials not properly configured")
+        self._credentials = credentials
+        self.default_timeout = default_timeout
+
+    @contextmanager
+    def create_connection(self) -> Generator[dbapi.Connection]:
+        """Create a connection to SAP Data Sphere"""
+        if not self._credentials.is_configured():
+            raise ValueError("SAP Data Sphere credentials not properly configured")
+
+        connect_params: dict[str, Any] = {
+            "address": self._credentials.host,
+            "port": self._credentials.port,
+            "user": self._credentials.user,
+            "password": self._credentials.password,
+        }
+
+        try:
+            # Connect to SAP Data Sphere
+            connection = dbapi.connect(**connect_params)
+            yield connection
+        except Exception:
+            raise
+        finally:
+            connection.close()
+
+    def execute_query(
+        self, query: str, timeout: int | None = None
+    ) -> list[tuple[Any, ...]] | list[dict[str, Any]]:
+        """Execute a SAP Data Sphere query with timeout
+
+        Args:
+            query: SQL query to execute
+            timeout: Query timeout in seconds
+
+        Returns:
+            Query results
+        """
+        timeout = timeout if timeout is not None else self.default_timeout
+        conn: dbapi.Connection
+        try:
+            with self.create_connection() as conn:
+                cursor = conn.cursor()
+                try:
+                    # Execute query
+                    cursor.execute(query)
+
+                    # Get results
+                    results = cursor.fetchall()
+
+                    return [
+                        dict(zip(row.column_names, row.column_values))
+                        for row in results
+                    ]
+
+                except Exception as e:
+                    # Handle SAP Data Sphere specific errors
+                    raise InvalidGeneratedCode(
+                        f"SAP Data Sphere error: {str(e)}",
+                        code=query,
+                        exception=None,
+                        traceback_str="",
+                    )
+                finally:
+                    cursor.close()
+
+        except Exception as e:
+            raise InvalidGeneratedCode(
+                f"Query execution failed: {str(e)}",
+                code=query,
+                exception=e,
+                traceback_str=traceback.format_exc(),
+            )
+
+    def get_tables(self, timeout: int | None = None) -> list[str]:
+        """Fetch list of tables from SAP Data Sphere schema"""
+        timeout = timeout if timeout is not None else self.default_timeout
+
+        conn: dbapi.Connection
+        try:
+            with self.create_connection() as conn:
+                cursor = conn.cursor()
+                try:
+                    # Get all tables and views in the schema
+                    cursor.execute(
+                        f"""
+                        SELECT TABLE_NAME 
+                        FROM SYS.TABLES 
+                        WHERE SCHEMA_NAME = '{self._credentials.db_schema}'
+                        ORDER BY TABLE_NAME
+                        """
+                    )
+                    tables = [row[0] for row in cursor.fetchall()]
+
+                    # Get all views
+                    cursor.execute(
+                        f"""
+                        SELECT VIEW_NAME 
+                        FROM SYS.VIEWS 
+                        WHERE SCHEMA_NAME = '{self._credentials.db_schema}'
+                        ORDER BY VIEW_NAME
+                        """
+                    )
+                    views = [row[0] for row in cursor.fetchall()]
+
+                    all_objects = tables + views
+
+                    # Log detailed results
+                    logger.info(
+                        f"Total objects found in schema {self._credentials.db_schema}: {len(all_objects)}"
+                    )
+                    logger.info(f"Tables: {len(tables)}, Views: {len(views)}")
+
+                    return all_objects
+
+                finally:
+                    cursor.close()
+
+        except Exception as e:
+            logger.error(f"Failed to fetch tables from SAP Data Sphere: {str(e)}")
+            logger.error(f"Error type: {type(e)}")
+            logger.error(f"Error details: {str(e)}")
+            return []
+
+    @functools.lru_cache(maxsize=8)
+    async def get_data(
+        self,
+        *table_names: str,
+        analyst_db: AnalystDB,
+        sample_size: int = 5000,
+        timeout: int | None = None,
+    ) -> list[str]:
+        """Load selected tables from SAP Data Sphere as DataFrames
+
+        Args:
+        - table_names: List of table names to fetch
+        - sample_size: Number of rows to sample from each table
+        - timeout: Query timeout in seconds
+
+        Returns:
+        - List of registered dataset names
+        """
+        timeout = timeout if timeout is not None else self.default_timeout
+        dataframes = []
+
+        try:
+            with self.create_connection() as conn:
+                cursor = conn.cursor()
+
+                for table in table_names:
+                    try:
+                        qualified_table = f'"{self._credentials.db_schema}"."{table}"'
+                        logger.info(f"Fetching data from table: {qualified_table}")
+
+                        # Execute query to get data with limit
+                        cursor.execute(
+                            f"""
+                            SELECT * FROM {qualified_table}
+                            LIMIT {sample_size}
+                            """
+                        )
+
+                        # Get column names
+                        columns = [desc[0] for desc in cursor.description]
+                        data = cursor.fetchall()
+
+                        # Convert to pandas DataFrame
+                        pandas_df = pd.DataFrame(data=data, columns=columns, dtype=str)
+
+                        # Convert to polars DataFrame
+                        df = pl.DataFrame(
+                            data=pandas_df, schema={col: pl.String for col in columns}
+                        )
+
+                        logger.info(
+                            f"Successfully loaded table {table}: {len(df)} rows, {len(df.columns)} columns"
+                        )
+                        dataframes.append(AnalystDataset(name=table, data=df))
+
+                    except Exception as e:
+                        logger.error(f"Error loading table {table}: {str(e)}")
+                        logger.error(f"Error type: {type(e)}")
+                        logger.error(f"Error details: {str(e)}")
+                        continue
+
+                # Register datasets
+                names = []
+                for dataframe in dataframes:
+                    await analyst_db.register_dataset(
+                        dataframe, DataSourceType.DATABASE
+                    )
+                    names.append(dataframe.name)
+                return names
+
+        except Exception as e:
+            logger.error(f"Error fetching SAP Data Sphere data: {str(e)}")
+            logger.error(f"Error type: {type(e)}")
+            logger.error(f"Error details: {str(e)}")
+            return []
+
+    def get_system_prompt(self) -> ChatCompletionSystemMessageParam:
+        return ChatCompletionSystemMessageParam(
+            role="system",
+            content=SYSTEM_PROMPT_SAP_DATASPHERE.format(
+                schema=self._credentials.db_schema,
+            ),
+        )
+
+
 def get_database_operator(app_infra: AppInfra) -> DatabaseOperator[Any]:
     if app_infra.database == "bigquery":
-        credentials: GoogleCredentials | SnowflakeCredentials | NoDatabaseCredentials
+        credentials: (
+            GoogleCredentials
+            | SnowflakeCredentials
+            | SAPDatasphereCredentials
+            | NoDatabaseCredentials
+        )
         try:
             credentials = GoogleCredentials()
             if credentials.service_account_key and credentials.db_schema:
@@ -561,6 +791,16 @@ def get_database_operator(app_infra: AppInfra) -> DatabaseOperator[Any]:
         except (ValidationError, ValueError):
             logger.warning(
                 "Snowflake credentials not properly configured, falling back to no database"
+            )
+        return NoDatabaseOperator(NoDatabaseCredentials())
+    elif app_infra.database == "sap":
+        try:
+            credentials = SAPDatasphereCredentials()
+            if credentials.is_configured():
+                return SAPDatasphereOperator(credentials)
+        except (ValidationError, ValueError):
+            logger.warning(
+                "SAP credentials not properly configured, falling back to no database"
             )
         return NoDatabaseOperator(NoDatabaseCredentials())
     else:
