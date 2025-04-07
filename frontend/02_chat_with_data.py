@@ -360,7 +360,7 @@ async def main() -> None:
     else:
         all_datasets = await analyst_db.list_analyst_datasets(
             data_source=DataSourceType.FILE
-        ) + await analyst_db.list_analyst_datasets(data_source=DataSourceType.CATALOG)
+        ) + await analyst_db.list_analyst_datasets(data_source=DataSourceType.REGISTRY)
 
     st.session_state.datasets_names = all_datasets
     if (

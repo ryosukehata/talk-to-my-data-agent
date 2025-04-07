@@ -70,7 +70,7 @@ async def test_data_source_type_saving() -> None:
     # Create test datasets for different data sources
     file_dataset = AnalystDataset(name="file_dataset", data=df)
     database_dataset = AnalystDataset(name="database_dataset", data=df)
-    catalog_dataset = AnalystDataset(name="catalog_dataset", data=df)
+    registry_dataset = AnalystDataset(name="registry_dataset", data=df)
 
     # Create a new database instance
     db = await get_analyst_db(ANALYST_DATABASE_VERSION + 2)
@@ -78,7 +78,7 @@ async def test_data_source_type_saving() -> None:
     # Register datasets with different data sources
     await db.register_dataset(file_dataset, data_source=DataSourceType.FILE)
     await db.register_dataset(database_dataset, data_source=DataSourceType.DATABASE)
-    await db.register_dataset(catalog_dataset, data_source=DataSourceType.CATALOG)
+    await db.register_dataset(registry_dataset, data_source=DataSourceType.REGISTRY)
 
     # Get all datasets
     all_datasets = await db.dataset_handler.list_datasets()
@@ -92,7 +92,7 @@ async def test_data_source_type_saving() -> None:
     # Verify each dataset has the correct data source
     assert dataset_sources["file_dataset"] == DataSourceType.FILE
     assert dataset_sources["database_dataset"] == DataSourceType.DATABASE
-    assert dataset_sources["catalog_dataset"] == DataSourceType.CATALOG
+    assert dataset_sources["registry_dataset"] == DataSourceType.REGISTRY
 
     # Test filtering by data source
     file_datasets = await db.dataset_handler.list_datasets(
@@ -101,29 +101,29 @@ async def test_data_source_type_saving() -> None:
     database_datasets = await db.dataset_handler.list_datasets(
         data_source=DataSourceType.DATABASE
     )
-    catalog_datasets = await db.dataset_handler.list_datasets(
-        data_source=DataSourceType.CATALOG
+    registry_datasets = await db.dataset_handler.list_datasets(
+        data_source=DataSourceType.REGISTRY
     )
 
     # Verify filtering works correctly
     assert len(file_datasets) == 1
     assert len(database_datasets) == 1
-    assert len(catalog_datasets) == 1
+    assert len(registry_datasets) == 1
 
     assert file_datasets[0].name == "file_dataset"
     assert database_datasets[0].name == "database_dataset"
-    assert catalog_datasets[0].name == "catalog_dataset"
+    assert registry_datasets[0].name == "registry_dataset"
 
     # Test the list_analyst_datasets method with data source filtering
     file_names = await db.list_analyst_datasets(data_source=DataSourceType.FILE)
     db_names = await db.list_analyst_datasets(data_source=DataSourceType.DATABASE)
-    catalog_names = await db.list_analyst_datasets(data_source=DataSourceType.CATALOG)
+    registry_names = await db.list_analyst_datasets(data_source=DataSourceType.REGISTRY)
 
     # Verify filtering works correctly at the higher level API
     assert len(file_names) == 1
     assert len(db_names) == 1
-    assert len(catalog_names) == 1
+    assert len(registry_names) == 1
 
     assert "file_dataset" in file_names
     assert "database_dataset" in db_names
-    assert "catalog_dataset" in catalog_names
+    assert "registry_dataset" in registry_names

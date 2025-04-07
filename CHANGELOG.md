@@ -7,12 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.1.9] - 2025-04-07
+
+### Fixed
+- Code generation inflection logic didn't quote the last but first error at retry
+- Python generation prompt referred to SQL
+- Fixed error when user doesn't have a last name
+
+### Added
+- Added test suite for each supported Python version
+
+### Changed
+- Installed [the datarobot-pulumi-utils library](https://github.com/datarobot-oss/datarobot-pulumi-utils) to incorporate majority of reused logic in the `infra.*` subpackages.
+- Snowflake prompt more robust to lower case table and column names
+- More robust code generation
+
 ## [0.1.8] - 2025-03-27
 
 ### Added
 - Support for NIMs
 - Support for existing TextGen deployments
-- SAP Datasphere support 
+- SAP Datasphere support
 
 ### Fixed
 - AI Catalog and Database caching
@@ -22,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Disabled session affinity for application
 - Made REST API endpoints OpenAPI compliant
 - Better DR token handling
+- Changed AI Catalog to Data Registry
 
 ## [0.1.7] - 2025-03-07
 
@@ -43,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Snowflake bug when table name included non-uppercase characters
 - pandas to polars conversion error when pandas.period is involved
 - data dictionary generation was confusing the LLM on snowflake
-  
+
 ### Changed
 - More consistent logging
 - use st.navigation
@@ -51,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.6] - 2025-02-18
 
 ### Fixed
-- remove information about tools from prompt if there are none 
+- remove information about tools from prompt if there are none
 - tools-related error fixed
 - remove hard-coded environment ID from LLM deployment
 
@@ -61,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LLM tool use support
 - Checkboxes allow changing conversation
 - DATABASE_CONNECTION_TYPE can be set from environment
-  
+
 ### Fixed
 - Fix issue where plotly charts reuse the same key
 - Fix [Clear Data] button
@@ -102,4 +118,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial functioning version of Pulumi template for data analyst
 - Changelog file to keep track of changes in the project.
 - pytest for api functions
-

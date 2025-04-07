@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import asyncio
 import json
 import uuid
@@ -52,7 +51,7 @@ class DatasetType(Enum):
 class DataSourceType(Enum):
     FILE = "file"
     DATABASE = "database"
-    CATALOG = "catalog"
+    REGISTRY = "catalog"
     GENERATED = "generated"
 
 
@@ -227,7 +226,7 @@ class DatasetHandler(BaseDuckDBHandler):
             name: Name for the table
             dataset_type: Type of dataset (STANDARD, CLEANSED, or DICTIONARY)
             original_name: For CLEANSED/DICTIONARY types, the name of the original dataset
-            data_source: The source of the data (DataSourceType.FILE, DataSourceType.DATABASE, or DataSourceType.CATALOG)
+            data_source: The source of the data (DataSourceType.FILE, DataSourceType.DATABASE, or DataSourceType.REGISTRY)
             file_size: Size of the source file in bytes (for FILE data sources)
         """
         logger.info(f"Registering dataframe {name} as {dataset_type.value}")
@@ -296,7 +295,7 @@ class DatasetHandler(BaseDuckDBHandler):
 
         Args:
             dataset_type: Optional filter by dataset type (STANDARD, CLEANSED, DICTIONARY)
-            data_source: Optional filter by data source (FILE, DATABASE, CATALOG)
+            data_source: Optional filter by data source (FILE, DATABASE, REGISTRY)
 
         Returns:
             List of DatasetMetadata for matching datasets
@@ -638,7 +637,7 @@ class ChatHandler(BaseDuckDBHandler):
 
         Args:
             chat_name: The name of the chat to create
-            data_source: The data source type for this chat (default: catalog)
+            data_source: The data source type for this chat (default: registry)
 
         Returns:
             The ID of the newly created chat
@@ -1108,7 +1107,7 @@ class AnalystDB:
         List all standard datasets, optionally filtered by data source.
 
         Args:
-            data_source: Optional filter by data source (FILE, DATABASE, CATALOG)
+            data_source: Optional filter by data source (FILE, DATABASE, REGISTRY)
 
         Returns:
             List of dataset names

@@ -55,7 +55,7 @@ empty_session_state = {
     "initialized": True,
     "datasets_names": [],
     "cleansed_data_names": [],
-    "selected_catalog_datasets": [],
+    "selected_registry_datasets": [],
     "data_source": DataSourceType.FILE,
     "file_uploader_key": 0,
     "processed_file_ids": [],

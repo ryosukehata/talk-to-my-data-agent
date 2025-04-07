@@ -1,7 +1,7 @@
 [project]
 name = "data-analyst"
 version = "0.1.0"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.10,<3.13"
 dynamic = ["dependencies"]
 
 [tool.setuptools]
@@ -88,11 +88,10 @@ docstring-code-format = false
 # enabled.
 docstring-code-line-length = "dynamic"
 
-
 [tool.mypy]
-plugins = "pydantic.mypy"
 strict = true
-ignore_missing_imports = true
+python_version = "3.11"
+plugins = "pydantic.mypy"
 exclude = """(?x)(
     output/ # exclude files starting with "output"
     | deployment_.*/
@@ -102,7 +101,22 @@ exclude = """(?x)(
     | .cache
     | e2e/
   )"""
-python_version = "3.11"
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_untyped_defs = true
+enable_error_code = "ignore-without-code"
+implicit_reexport = true
+ignore_missing_imports = true
+no_implicit_optional = true
+show_column_numbers = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
 module = "datarobot.*"

@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 from __future__ import annotations
 
 import ast
@@ -24,10 +23,11 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
-from types import ModuleType
+from types import ModuleType, TracebackType
 from typing import (
     Any,
     AsyncGenerator,
+    Type,
     TypeVar,
     cast,
 )
@@ -71,7 +71,6 @@ from utils.database_helpers import Database
 from utils.logging_helper import get_logger, log_api_call
 from utils.resources import LLMDeployment
 from utils.schema import (
-    AiCatalogDataset,
     AnalysisError,
     AnalystChatMessage,
     AnalystDataset,
@@ -84,6 +83,7 @@ from utils.schema import (
     DatabaseAnalysisCodeGeneration,
     DataDictionary,
     DataDictionaryColumn,
+    DataRegistryDataset,
     DictionaryGeneration,
     EnhancedQuestionGeneration,
     GetBusinessAnalysisMetadata,
@@ -138,7 +138,12 @@ try:
             )
             return self.client
 
-        async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # type:ignore
+        async def __aexit__(
+            self,
+            exc_type: Type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: TracebackType | None,
+        ) -> None:
             await self.openai_client.close()  # Properly close the client
 
 except ValidationError as e:
@@ -152,7 +157,7 @@ except ValidationError as e:
 ALTERNATIVE_LLM_BIG = "datarobot-deployed-llm"
 ALTERNATIVE_LLM_SMALL = "datarobot-deployed-llm"
 DICTIONARY_BATCH_SIZE = 10
-MAX_AI_CATALOG_DATASET_SIZE = 400e6  # aligns to 400MB set in streamlit config.toml
+MAX_REGISTRY_DATASET_SIZE = 400e6  # aligns to 400MB set in streamlit config.toml
 DISK_CACHE_LIMIT_BYTES = 512e6
 
 _memory = Memory(tempfile.gettempdir(), verbose=0)
@@ -188,7 +193,7 @@ def cache(f: T) -> T:
                 _memory.reduce_size(DISK_CACHE_LIMIT_BYTES)
             else:
                 logger.info(
-                    f"Using previously cached result for function `{f.__name__}`"  # type: ignore
+                    f"Using previously cached result for function `{f.__name__}`"  # type: ignore[attr-defined]
                 )
             return result
 
@@ -196,9 +201,9 @@ def cache(f: T) -> T:
 
 
 # This can be large as we are not storing the actual datasets in memory, just metadata
-def list_catalog_datasets(limit: int = 100) -> list[AiCatalogDataset]:
+def list_registry_datasets(limit: int = 100) -> list[DataRegistryDataset]:
     """
-    Fetch datasets from AI Catalog with specified limit
+    Fetch datasets from Data Registry with specified limit
 
     Args:
         limit: int
@@ -211,7 +216,7 @@ def list_catalog_datasets(limit: int = 100) -> list[AiCatalogDataset]:
     datasets = dr.client.get_client().get(url).json()["data"]
 
     return [
-        AiCatalogDataset(
+        DataRegistryDataset(
             id=ds["datasetId"],
             name=ds["name"],
             created=(
@@ -227,7 +232,7 @@ def list_catalog_datasets(limit: int = 100) -> list[AiCatalogDataset]:
     ]
 
 
-async def download_catalog_datasets(
+async def download_registry_datasets(
     dataset_ids: list[str], analyst_db: AnalystDB
 ) -> list[str]:
     """Load selected datasets as pandas DataFrames
@@ -241,10 +246,10 @@ async def download_catalog_datasets(
     datasets = [dr.Dataset.get(id_) for id_ in dataset_ids]
     if (
         sum([ds.size for ds in datasets if ds.size is not None])
-        > MAX_AI_CATALOG_DATASET_SIZE
+        > MAX_REGISTRY_DATASET_SIZE
     ):
         raise ValueError(
-            f"The requested AI Catalog datasets must total <= {int(MAX_AI_CATALOG_DATASET_SIZE)} bytes"
+            f"The requested Data Registry datasets must total <= {int(MAX_REGISTRY_DATASET_SIZE)} bytes"
         )
 
     result_datasets: list[AnalystDataset] = []
@@ -262,7 +267,7 @@ async def download_catalog_datasets(
     names = []
     for result_dataset in result_datasets:
         await analyst_db.register_dataset(
-            result_dataset, DataSourceType.CATALOG, dataset.size or 0
+            result_dataset, DataSourceType.REGISTRY, dataset.size or 0
         )
         names.append(result_dataset.name)
     return names
@@ -887,7 +892,7 @@ async def _run_charts(
         exception_history = []
 
     code = await _generate_run_charts_python_code(
-        request, next(iter(exception_history), None)
+        request, next(iter(exception_history[::-1]), None)
     )
     try:
         result = execute_python(
@@ -1045,7 +1050,7 @@ async def _run_analysis(
     code = await _generate_run_analysis_python_code(
         request,
         analyst_db,
-        next(iter(exception_history), None),
+        next(iter(exception_history[::-1]), None),
         attempt=len(exception_history),
     )
     logger.info("Code generated, preparing execution")
@@ -1226,7 +1231,7 @@ async def _run_database_analysis(
         exception_history = []
 
     sql_code = await _generate_database_analysis_code(
-        request, analyst_db, next(iter(exception_history), None)
+        request, analyst_db, next(iter(exception_history[::-1]), None)
     )
     try:
         results = Database.execute_query(query=sql_code)

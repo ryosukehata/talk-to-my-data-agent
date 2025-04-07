@@ -11,12 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import os
 
 from utils.schema import DatabaseConnectionType
 
 # Valid values are: "snowflake", "bigquery", "sap" or "no_database"
-DATABASE_CONNECTION_TYPE: DatabaseConnectionType = os.getenv(  # type: ignore
+DATABASE_CONNECTION_TYPE: DatabaseConnectionType = os.getenv(  # type: ignore[assignment]
     "DATABASE_CONNECTION_TYPE", "no_database"
 )

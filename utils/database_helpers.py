@@ -404,7 +404,7 @@ class BigQueryOperator(DatabaseOperator[BigQueryCredentialArgs]):
     def create_connection(self) -> Generator[bigquery.Client]:
         from google.oauth2 import service_account
 
-        google_credentials = service_account.Credentials.from_service_account_info(  # type: ignore
+        google_credentials = service_account.Credentials.from_service_account_info(  # type: ignore[no-untyped-call]
             GoogleCredentials().service_account_key,
             scopes=["https://www.googleapis.com/auth/cloud-platform"],
         )
@@ -414,7 +414,7 @@ class BigQueryOperator(DatabaseOperator[BigQueryCredentialArgs]):
 
         yield client
 
-        client.close()  # type: ignore
+        client.close()  # type: ignore[no-untyped-call]
 
     def execute_query(
         self, query: str, timeout: int | None = None

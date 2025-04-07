@@ -11,20 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from pathlib import Path
 
-import os
-from urllib.parse import urlsplit
-
-
-def get_deployment_url(deployment_id: str) -> str:
-    """Translate deployment ID to GUI URL.
-
-    Parameters
-    ----------
-    deployment_id : str
-        DataRobot deployment id.
-    endpoint: str
-        DataRobot public API endpoint e.g. envir
-    """
-    parsed_dr_url = urlsplit(os.environ["DATAROBOT_ENDPOINT"])
-    return f"{parsed_dr_url.scheme}://{parsed_dr_url.netloc}/console-nextgen/deployments/{deployment_id}/"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.absolute()

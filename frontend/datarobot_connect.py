@@ -76,7 +76,7 @@ class DataRobotTokenManager:
     def _get_contents_from_url(self, url: str) -> dict[str, Any]:
         """Fetch data from DataRobot API using JavaScript."""
         js_command = self._JS_COMMAND_TEMPLATE.replace("URL", url)
-        result = st_javascript(js_command, key=url)
+        result = st_javascript(js_command)
         time.sleep(1)
         data = {}
         try:
@@ -143,11 +143,9 @@ class DataRobotTokenManager:
 
     async def display_info(self, stc: DeltaGenerator) -> None:
         # stc.subheader("DataRobot Connect", divider="rainbow")
-        username = (
-            st.session_state.get("datarobot_firstName", "")
-            + " "
-            + st.session_state.get("datarobot_lastName", "")
-        ).strip()
+        first_name = st.session_state.get("datarobot_firstName", "") or ""
+        last_name = st.session_state.get("datarobot_lastName", "") or ""
+        username = (first_name + " " + last_name).strip()
         if len(username) > 0:
             stc.write(f"Hello {username}")
 

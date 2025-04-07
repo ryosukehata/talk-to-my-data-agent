@@ -41,7 +41,7 @@ def load_from_database(browser: webdriver.Chrome, dataset: str) -> None:
     wait_for_element_to_be_visible(
         browser,
         By.XPATH,
-        "//p[contains(text(), 'Select datasets from AI Catalog')]",
+        "//p[contains(text(), 'Select datasets from the Data Registry')]",
     )
 
     click_element(
@@ -70,7 +70,7 @@ def load_from_database(browser: webdriver.Chrome, dataset: str) -> None:
     click_element(
         browser,
         By.XPATH,
-        "//p[contains(text(), 'Select datasets from AI Catalog')]",
+        "//p[contains(text(), 'Select datasets from the Data Registry')]",
     )
 
     click_element(

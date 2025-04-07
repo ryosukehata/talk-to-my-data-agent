@@ -11,45 +11,42 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 from __future__ import annotations
 
 import datarobot as dr
 import pulumi
 import pulumi_datarobot as datarobot
+from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
+from datarobot_pulumi_utils.schema.custom_models import (
+    CustomModelArgs,
+    DeploymentArgs,
+    RegisteredModelArgs,
+)
+from datarobot_pulumi_utils.schema.exec_envs import RuntimeEnvironments
+from datarobot_pulumi_utils.schema.llms import LLMBlueprintArgs, LLMs, PlaygroundArgs
 
 from utils.schema import LLMDeploymentSettings
 
-from .common.globals import GlobalLLM, GlobalRuntimeEnvironment
-from .common.schema import (
-    CustomModelArgs,
-    DeploymentArgs,
-    LLMBlueprintArgs,
-    PlaygroundArgs,
-    RegisteredModelArgs,
-)
-from .common.stack import project_name
-
-LLM = GlobalLLM.AZURE_OPENAI_GPT_4_O
+LLM = LLMs.AZURE_OPENAI_GPT_4_O
 
 custom_model_args = CustomModelArgs(
-    resource_name=f"Generative Analyst Custom Model [{project_name}]",
+    resource_name=f"Generative Analyst Custom Model [{PROJECT_NAME}]",
     name="Generative Analyst Assistant",  # built-in QA app uses this as the AI's name
     target_name=LLMDeploymentSettings().target_feature_name,
     target_type=dr.enums.TARGET_TYPE.TEXT_GENERATION,
     replicas=2,
-    base_environment_id=GlobalRuntimeEnvironment.PYTHON_312_MODERATIONS.value.id,
+    base_environment_id=RuntimeEnvironments.PYTHON_312_MODERATIONS.value.id,
     opts=pulumi.ResourceOptions(delete_before_replace=True),
 )
 
 registered_model_args = RegisteredModelArgs(
-    resource_name=f"Generative Analyst Registered Model [{project_name}]",
+    resource_name=f"Generative Analyst Registered Model [{PROJECT_NAME}]",
 )
 
 
 deployment_args = DeploymentArgs(
-    resource_name=f"Generative Analyst Deployment [{project_name}]",
-    label=f"Generative Analyst Deployment [{project_name}]",
+    resource_name=f"Generative Analyst Deployment [{PROJECT_NAME}]",
+    label=f"Generative Analyst Deployment [{PROJECT_NAME}]",
     association_id_settings=datarobot.DeploymentAssociationIdSettingsArgs(
         column_names=["association_id"],
         auto_generate_id=False,
@@ -64,11 +61,11 @@ deployment_args = DeploymentArgs(
 )
 
 playground_args = PlaygroundArgs(
-    resource_name=f"Generative Analyst Playground [{project_name}]",
+    resource_name=f"Generative Analyst Playground [{PROJECT_NAME}]",
 )
 
 llm_blueprint_args = LLMBlueprintArgs(
-    resource_name=f"Generative Analyst LLM Blueprint [{project_name}]",
+    resource_name=f"Generative Analyst LLM Blueprint [{PROJECT_NAME}]",
     llm_id=LLM.name,
     llm_settings=datarobot.LlmBlueprintLlmSettingsArgs(
         max_completion_length=2048,

@@ -1,6 +1,6 @@
 # Talk to My Data  
 
-**Talk to My Data** delivers a seamless **talk-to-your-data** experience, transforming files, spreadsheets, and cloud data into actionable insights. Simply upload data, connect to Snowflake or BigQuery, or access datasets from DataRobot's AI Catalog. Then, ask a question, and the agent recommends business analyses, generating **charts, tables, and even code** to help you interpret the results.  
+**Talk to My Data** delivers a seamless **talk-to-your-data** experience, transforming files, spreadsheets, and cloud data into actionable insights. Simply upload data, connect to Snowflake or BigQuery, or access datasets from DataRobot's Data Registry. Then, ask a question, and the agent recommends business analyses, generating **charts, tables, and even code** to help you interpret the results.  
 
 This intuitive experience is designed for **scalability and flexibility**, ensuring that whether you're working with a few thousand rows or billions, your data analysis remains **fast, efficient, and insightful**.  
 
@@ -66,7 +66,7 @@ Codespace users can **skip steps 1 and 2**. For local development, follow all of
    ```bash
    python quickstart.py YOUR_PROJECT_NAME  # Windows users may have to use `py` instead of `python`
    ```
-   Python 3.9+ is required.
+   Python 3.10 - 12 are supported
 
 
 Advanced users desiring control over virtual environment creation, dependency installation, environment variable setup

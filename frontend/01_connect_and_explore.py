@@ -34,18 +34,18 @@ from helpers import state_empty, state_init
 
 from utils.analyst_db import AnalystDB, DataSourceType
 from utils.api import (
-    download_catalog_datasets,
-    list_catalog_datasets,
+    download_registry_datasets,
+    list_registry_datasets,
     log_memory,
     process_data_and_update_state,
 )
 from utils.database_helpers import Database, app_infra
 from utils.logging_helper import get_logger
 from utils.schema import (
-    AiCatalogDataset,
     AnalystDataset,
     CleansedColumnReport,
     DataDictionary,
+    DataRegistryDataset,
 )
 
 warnings.filterwarnings("ignore")
@@ -114,22 +114,22 @@ def clear_data_callback() -> None:
     st.session_state.file_uploader_key += 1  # Used to clear file_uploader
 
 
-# Add callback for AI Catalog dataset selection
-async def catalog_download_callback() -> None:
-    """Callback function for AI Catalog dataset download"""
+# Add callback for Data Registry dataset selection
+async def registry_download_callback() -> None:
+    """Callback function for Data Registry dataset download"""
     if (
-        "selected_catalog_datasets" in st.session_state
-        and st.session_state.selected_catalog_datasets
+        "selected_registry_datasets" in st.session_state
+        and st.session_state.selected_registry_datasets
     ):
-        st.session_state.data_source = DataSourceType.CATALOG
+        st.session_state.data_source = DataSourceType.REGISTRY
 
         with st.sidebar:  # Use sidebar context
             with st.spinner("Loading selected datasets..."):
                 selected_ids = [
-                    ds["id"] for ds in st.session_state.selected_catalog_datasets
+                    ds["id"] for ds in st.session_state.selected_registry_datasets
                 ]
                 with st.session_state.datarobot_connect.use_user_token():
-                    dataframes = await download_catalog_datasets(
+                    dataframes = await download_registry_datasets(
                         selected_ids, st.session_state.analyst_db
                     )
 
@@ -193,9 +193,9 @@ async def uploaded_file_callback(uploaded_files: list[UploadedFile]) -> None:
                 st.session_state.processed_file_ids.append(file.file_id)
 
 
-@st.cache_data(ttl="60s", show_spinner=False)
-def st_list_catalog_datasets() -> list[AiCatalogDataset]:
-    return list_catalog_datasets()
+@st.cache_data(ttl=60, show_spinner=False)
+def st_list_registry_datasets() -> list[DataRegistryDataset]:
+    return list_registry_datasets()
 
 
 @st.cache_data(ttl="60s", show_spinner=False)
@@ -216,7 +216,7 @@ async def main() -> None:
     with st.sidebar:
         st.title("Connect")
 
-        # Load Files expander containing file upload and AI Catalog
+        # Load Files expander containing file upload and the Data Registry
         with st.expander("Load Files", expanded=True):
             # File upload section
             col1, col2, col3 = st.columns([1, 4, 2])
@@ -233,23 +233,23 @@ async def main() -> None:
             if uploaded_files:
                 await uploaded_file_callback(uploaded_files)
 
-            # AI Catalog section
-            st.subheader("☁️   DataRobot AI Catalog")
+            # Data Registry section
+            st.subheader("☁️   DataRobot Data Registry")
 
-            # Get datasets from catalog
+            # Get datasets from registry
 
-            with st.spinner("Loading datasets from AI Catalog..."):
+            with st.spinner("Loading datasets from the Data Registry..."):
                 with st.session_state.datarobot_connect.use_user_token():
-                    datasets = [i.model_dump() for i in st_list_catalog_datasets()]
+                    datasets = [i.model_dump() for i in st_list_registry_datasets()]
 
             # Create form for dataset selection
-            with st.form("catalog_selection_form", border=False):
-                selected_catalog_datasets = st.multiselect(
-                    "Select datasets from AI Catalog",
+            with st.form("registry_selection_form", border=False):
+                selected_registry_datasets = st.multiselect(
+                    "Select datasets from the Data Registry",
                     options=datasets,
                     format_func=lambda x: f"{x['name']} ({x['size']})",
                     help="You can select multiple datasets",
-                    key="selected_catalog_datasets",
+                    key="selected_registry_datasets",
                 )
 
                 # Form submit button
@@ -258,8 +258,8 @@ async def main() -> None:
                 )
 
                 # Process form submission
-                if submit_button and len(selected_catalog_datasets) > 0:
-                    await catalog_download_callback()
+                if submit_button and len(selected_registry_datasets) > 0:
+                    await registry_download_callback()
                 elif submit_button:
                     st.warning("Please select at least one dataset")
 

@@ -11,25 +11,28 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import re
 import textwrap
 from typing import List, Sequence, Tuple
 
 import pulumi_datarobot as datarobot
+from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
+from datarobot_pulumi_utils.schema.apps import ApplicationSourceArgs
+from datarobot_pulumi_utils.schema.exec_envs import RuntimeEnvironments
 from settings_database import DATABASE_CONNECTION_TYPE
 
-from infra.common.schema import ApplicationSourceArgs
-from infra.common.stack import PROJECT_ROOT, project_name
 from utils.credentials import SnowflakeCredentials
+
+from .settings_main import PROJECT_ROOT
 
 application_path = PROJECT_ROOT / "frontend"
 
 app_source_args = ApplicationSourceArgs(
-    resource_name=f"Data Analyst App Source [{project_name}]",
+    resource_name=f"Data Analyst App Source [{PROJECT_NAME}]",
+    base_environment_id=RuntimeEnvironments.PYTHON_312_APPLICATION_BASE.value.id,
 ).model_dump(mode="json", exclude_none=True)
 
-app_resource_name: str = f"Data Analyst Application [{project_name}]"
+app_resource_name: str = f"Data Analyst Application [{PROJECT_NAME}]"
 
 
 def _prep_metadata_yaml(
