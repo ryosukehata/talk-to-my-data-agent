@@ -42,6 +42,7 @@ import psutil
 import scipy
 import sklearn
 import statsmodels as sm
+from datarobot.client import RESTClientObject
 from joblib import Memory
 from openai import AsyncOpenAI
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
@@ -67,7 +68,7 @@ from utils.data_cleansing_helpers import (
     add_summary_statistics,
     process_column,
 )
-from utils.database_helpers import Database
+from utils.database_helpers import get_external_database
 from utils.logging_helper import get_logger, log_api_call
 from utils.resources import LLMDeployment
 from utils.schema import (
@@ -113,46 +114,45 @@ def log_memory() -> None:
     logger.info(f"Memory usage: {memory:.2f} MB")
 
 
-try:
-    dr_client = dr.Client()
-    chat_agent_deployment_id = LLMDeployment().id
-    deployment_chat_base_url = (
-        dr_client.endpoint + f"/deployments/{chat_agent_deployment_id}/"
-    )
+def initialize_deployment() -> tuple[RESTClientObject, str]:
+    try:
+        dr_client = dr.Client()
+        chat_agent_deployment_id = LLMDeployment().id
+        deployment_chat_base_url = (
+            dr_client.endpoint + f"/deployments/{chat_agent_deployment_id}/"
+        )
+        return dr_client, deployment_chat_base_url
+    except ValidationError as e:
+        raise ValueError(
+            "Unable to load Deployment ID."
+            "If running locally, verify you have selected the correct "
+            "stack and that it is active using `pulumi stack output`. "
+            "If running in DataRobot, verify your runtime parameters have been set correctly."
+        ) from e
 
-    class AsyncLLMClient:
-        async def __aenter__(self) -> instructor.AsyncInstructor:
-            dr_client = dr.Client()
-            chat_agent_deployment_id = LLMDeployment().id
-            deployment_chat_base_url = (
-                dr_client.endpoint + f"/deployments/{chat_agent_deployment_id}/"
-            )
-            self.openai_client = AsyncOpenAI(
-                api_key=dr_client.token,
-                base_url=deployment_chat_base_url,
-                timeout=90,
-                max_retries=2,
-            )
-            self.client = instructor.from_openai(
-                self.openai_client, mode=instructor.Mode.MD_JSON
-            )
-            return self.client
 
-        async def __aexit__(
-            self,
-            exc_type: Type[BaseException] | None,
-            exc_val: BaseException | None,
-            exc_tb: TracebackType | None,
-        ) -> None:
-            await self.openai_client.close()  # Properly close the client
+class AsyncLLMClient:
+    async def __aenter__(self) -> instructor.AsyncInstructor:
+        dr_client, deployment_chat_base_url = initialize_deployment()
+        self.openai_client = AsyncOpenAI(
+            api_key=dr_client.token,
+            base_url=deployment_chat_base_url,
+            timeout=90,
+            max_retries=2,
+        )
+        self.client = instructor.from_openai(
+            self.openai_client, mode=instructor.Mode.MD_JSON
+        )
+        return self.client
 
-except ValidationError as e:
-    raise ValueError(
-        "Unable to load Deployment ID."
-        "If running locally, verify you have selected the correct "
-        "stack and that it is active using `pulumi stack output`. "
-        "If running in DataRobot, verify your runtime parameters have been set correctly."
-    ) from e
+    async def __aexit__(
+        self,
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        await self.openai_client.close()  # Properly close the client
+
 
 ALTERNATIVE_LLM_BIG = "datarobot-deployed-llm"
 ALTERNATIVE_LLM_SMALL = "datarobot-deployed-llm"
@@ -1140,6 +1140,15 @@ async def run_analysis(
                 exception=AnalysisError.from_max_reflection_exception(e),
             ),
         )
+    except ValueError as e:
+        return RunAnalysisResult(
+            status="error",
+            metadata=RunAnalysisResultMetadata(
+                duration=0,
+                attempts=1,
+                exception=AnalysisError.from_value_error(e),
+            ),
+        )
 
 
 async def _generate_database_analysis_code(
@@ -1174,7 +1183,7 @@ async def _generate_database_analysis_code(
 
     # Create messages for OpenAI
     messages: list[ChatCompletionMessageParam] = [
-        Database.get_system_prompt(),
+        get_external_database().get_system_prompt(),
         ChatCompletionUserMessageParam(
             content=f"Business Question: {request.question}",
             role="user",
@@ -1234,7 +1243,7 @@ async def _run_database_analysis(
         request, analyst_db, next(iter(exception_history[::-1]), None)
     )
     try:
-        results = Database.execute_query(query=sql_code)
+        results = get_external_database().execute_query(query=sql_code)
         results = cast(list[dict[str, Any]], results)
         duration = datetime.now() - start_time
 
@@ -1392,6 +1401,7 @@ async def run_complete_analysis(
 
             yield AnalysisGenerationError(error_message)
 
+            assistant_message.in_progress = False
             await analyst_db.update_chat(
                 chat_message=assistant_message,
                 chat_id=chat_id,
@@ -1400,6 +1410,7 @@ async def run_complete_analysis(
             return
 
         yield analysis_result
+
         assistant_message.components.append(analysis_result)
         await analyst_db.update_chat(
             chat_message=assistant_message,
@@ -1412,6 +1423,7 @@ async def run_complete_analysis(
 
         yield AnalysisGenerationError(error_message)
 
+        assistant_message.in_progress = False
         await analyst_db.update_chat(
             chat_message=assistant_message,
             chat_id=chat_id,
@@ -1425,6 +1437,12 @@ async def run_complete_analysis(
         and analysis_result.dataset
         and (enable_chart_generation or enable_business_insights)
     ):
+        assistant_message.in_progress = False
+        await analyst_db.update_chat(
+            chat_message=assistant_message,
+            chat_id=chat_id,
+            mode="overwrite",
+        )
         return
 
     # Run concurrent analyses

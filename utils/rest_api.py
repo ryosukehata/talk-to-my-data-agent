@@ -26,8 +26,6 @@ from pathlib import Path
 from typing import Any, Generator, List, Union, cast
 
 import datarobot as dr
-import httpx
-import pandas as pd
 import polars as pl
 from fastapi import (
     APIRouter,
@@ -48,7 +46,8 @@ from openai.types.chat.chat_completion_user_message_param import (
 )
 
 from utils.analyst_db import AnalystDB, DatasetMetadata, DataSourceType
-from utils.database_helpers import Database
+from utils.database_helpers import get_external_database
+from utils.logging_helper import get_logger
 
 sys.path.append("..")
 
@@ -69,11 +68,14 @@ from utils.schema import (
     ChatUpdate,
     CleansedDataset,
     DataDictionary,
+    DataDictionaryResponse,
     DataRegistryDataset,
     DictionaryCellUpdate,
     FileUploadResponse,
     LoadDatabaseRequest,
 )
+
+logger = get_logger()
 
 
 async def get_database(user_id: str) -> AnalystDB:
@@ -112,9 +114,9 @@ app = FastAPI(
     - Python code generation
     - Chart creation
     - Business insights generation
-    
+
     Available endpoint groups:
-    - /api/v1/catalog: Access Data Registry datasets
+    - /api/v1/registry: Access Data Registry datasets
     - /api/v1/database: Database connection and table management
     - /api/v1/datasets: Upload, retrieve, and manage datasets
     - /api/v1/dictionaries: Manage data dictionaries
@@ -201,15 +203,27 @@ session_lock = asyncio.Lock()
 @contextmanager
 def use_user_token(request: Request) -> Generator[None, None, None]:
     """Context manager to temporarily use the user's DataRobot token."""
-    if not request.state.session.datarobot_api_token:
+    if request.state.session.datarobot_api_token:
+        with dr.Client(
+            token=request.state.session.datarobot_api_token,
+            endpoint=request.state.session.datarobot_endpoint,
+        ):
+            yield
+    elif request.state.session.datarobot_api_skoped_token:
+        with dr.Client(
+            token=request.state.session.datarobot_api_skoped_token,
+            endpoint=request.state.session.datarobot_endpoint,
+        ):
+            yield
+    elif not os.environ.get(
+        "DR_CUSTOM_APP_EXTERNAL_URL"
+    ):  # indicates that it's a local environment
         yield
-        return
-
-    with dr.Client(
-        token=request.state.session.datarobot_api_token,
-        endpoint=request.state.session.datarobot_api_endpoint,
-    ):
-        yield
+    else:
+        raise HTTPException(
+            status_code=401,
+            detail="API token required. Please authenticate with DataRobot.",
+        )
 
 
 @app.middleware("http")
@@ -217,16 +231,35 @@ async def add_session_middleware(request: Request, call_next):  # type: ignore[n
     request_methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
     if request.method in request_methods:
         # Initialize the session
-        session_state, session_id, user_id, new_user_id = await _initialize_session(
-            request
-        )
+        session_state, session_id, user_id = await _initialize_session(request)
         request.state.session = session_state
 
-        # Initialize database in the session
-        await _initialize_database(request, user_id, new_user_id)
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.replace("Bearer ", "")
+            if request.state.session.datarobot_api_skoped_token != token:
+                request.state.session.datarobot_api_skoped_token = token
 
-        # Fetch DataRobot credentials if needed
-        await _fetch_datarobot_credentials(request, session_state)
+        account_info = {}
+        if not request.state.session.datarobot_account_info:
+            try:
+                if (
+                    request.state.session.datarobot_api_token
+                    or request.state.session.datarobot_api_skoped_token
+                ):
+                    with use_user_token(request):
+                        reply = dr.client.get_client().get("account/info/")
+                        account_info = reply.json()
+            except Exception as e:
+                logger.info(f"Error fetching account info: {e}")
+        else:
+            account_info = request.state.session.datarobot_account_info
+
+        request.state.session.datarobot_account_info = account_info
+        dr_uid = request.state.session.datarobot_account_info.get("uid")
+
+        # Initialize database in the session
+        await _initialize_database(request, dr_uid or user_id)
 
     # Process the request
     response: Response = await call_next(request)
@@ -242,13 +275,19 @@ async def add_session_middleware(request: Request, call_next):  # type: ignore[n
 
 async def _initialize_session(
     request: Request,
-) -> tuple[SessionState, str, str | None, str]:
+) -> tuple[
+    SessionState,
+    str,
+    str,
+]:
     """Initialize the session state and return the session ID and user ID."""
     # Create a new session state with default values
     session_state = SessionState()
     empty_session_state = {
+        "datarobot_account_info": None,
+        "datarobot_endpoint": os.environ.get("DATAROBOT_ENDPOINT"),
         "datarobot_api_token": None,
-        "datarobot_api_endpoint": None,
+        "datarobot_api_skoped_token": None,
         "analyst_db": None,
     }
     session_state.update(deepcopy(empty_session_state))
@@ -263,13 +302,15 @@ async def _initialize_session(
             pass  # If decoding fails, continue without user_id
 
     # Generate a new user ID if needed
-    new_user_id = str(uuid.uuid4())[:36]
+    email_header = request.headers.get("x-user-email")
+    if email_header:
+        new_user_id = str(uuid.uuid5(uuid.NAMESPACE_OID, email_header))[:36]
+    else:
+        new_user_id = str(uuid.uuid4())[:36]
 
     # Determine session ID
     if session_fastapi_cookie:
         session_id = session_fastapi_cookie
-    elif user_id:
-        session_id = base64.b64encode(user_id.encode()).decode()
     else:
         session_id = base64.b64encode(new_user_id.encode()).decode()
 
@@ -277,73 +318,20 @@ async def _initialize_session(
     async with session_lock:
         existing_session = session_store.get(session_id)
         if existing_session:
-            return existing_session, session_id, user_id, new_user_id
+            return existing_session, session_id, user_id or new_user_id
         else:
             session_store[session_id] = session_state
-            return session_state, session_id, user_id, new_user_id
+            return session_state, session_id, user_id or new_user_id
 
 
-async def _initialize_database(
-    request: Request, user_id: str | None, new_user_id: str
-) -> None:
+async def _initialize_database(request: Request, user_id: str) -> None:
     """Initialize the database in the session if not already initialized."""
     if (
         not hasattr(request.state.session, "analyst_db")
         or request.state.session.analyst_db is None
     ):
         async with session_lock:
-            if user_id:
-                request.state.session.analyst_db = await get_database(user_id[:36])
-            else:
-                request.state.session.analyst_db = await get_database(new_user_id)
-
-
-async def _fetch_datarobot_credentials(
-    request: Request, session_state: SessionState
-) -> None:
-    """Fetch DataRobot credentials if no user_id is available."""
-    session_cookie = request.cookies.get("session")
-    if not session_cookie:
-        return  # No session cookie, can't fetch credentials
-
-    try:
-        async with httpx.AsyncClient(cookies={"session": session_cookie}) as client:
-            # Get account info
-            api_response = await client.get("/api/v2/account/info/")
-            if api_response.status_code != 200:
-                return
-
-            account_info = api_response.json()
-
-            # Store user info in session state
-            if "uid" in account_info:
-                for k, v in account_info.items():
-                    setattr(session_state, f"datarobot_{k}", v)
-
-            # Get API keys
-            api_keys_response = await client.get("/api/v2/account/apiKeys/")
-            if api_keys_response.status_code != 200:
-                return
-
-            api_keys_data = api_keys_response.json()
-
-            # Find first non-expiring key
-            if "data" in api_keys_data:
-                keys = [
-                    key["key"]
-                    for key in api_keys_data["data"]
-                    if key["expireAt"] is None
-                ]
-                if keys:
-                    # Store the API token in session state
-                    datarobot_api_token = keys[0]
-                    datarobot_api_endpoint = os.environ.get("DATAROBOT_ENDPOINT")
-
-                    # Initialize session state with DR credentials
-                    session_state.datarobot_api_token = datarobot_api_token
-                    session_state.datarobot_api_endpoint = datarobot_api_endpoint
-    except Exception:
-        pass
+            request.state.session.analyst_db = await get_database(user_id)
 
 
 def _set_session_cookie(
@@ -361,13 +349,16 @@ def _set_session_cookie(
 
 
 @router.get("/registry/datasets")
-async def get_registry_datasets(limit: int = 100) -> list[DataRegistryDataset]:
-    return list_registry_datasets(limit)
+async def get_registry_datasets(
+    request: Request, limit: int = 100
+) -> list[DataRegistryDataset]:
+    with use_user_token(request):
+        return list_registry_datasets(limit)
 
 
 @router.get("/database/tables")
 async def get_database_tables() -> list[str]:
-    return Database.get_tables()
+    return get_external_database().get_tables()
 
 
 async def process_and_update(
@@ -400,10 +391,9 @@ async def upload_files(
                 file_extension = os.path.splitext(file.filename)[1].lower()
 
                 if file_extension == ".csv":
-                    df = pd.read_csv(io.StringIO(contents.decode("utf-8")))
+                    df = pl.read_csv(io.StringIO(contents.decode("utf-8")))
                     dataset_name = os.path.splitext(file.filename)[0]
-                    data = cast(list[dict[str, Any]], df.to_dict(orient="records"))
-                    dataset = AnalystDataset(name=dataset_name, data=data)
+                    dataset = AnalystDataset(name=dataset_name, data=df)
 
                     # Register dataset with the database
                     await analyst_db.register_dataset(
@@ -425,12 +415,11 @@ async def upload_files(
                     base_name = os.path.splitext(file.filename)[0]
                     contents = await file.read()
                     excel_file = io.BytesIO(contents)
-                    sheet_names = pl.read_excel(
+                    excel_dataset = pl.read_excel(
                         excel_file, sheet_id=None
                     )  # Get available sheet names
-                    if isinstance(sheet_names, dict):
-                        for sheet_name in sheet_names:
-                            data = pl.read_excel(excel_file, sheet_name=sheet_name)
+                    if isinstance(excel_dataset, dict):
+                        for sheet_name, data in excel_dataset.items():
                             dataset_name = f"{base_name}_{sheet_name}"
                             dataset = AnalystDataset(name=dataset_name, data=data)
                             await analyst_db.register_dataset(
@@ -446,9 +435,9 @@ async def upload_files(
                                 "dataset_name": dataset_name,
                             }
                             response.append(excel_sheet_response)
-                    else:
+                    elif isinstance(excel_dataset, pl.DataFrame):
                         dataset_name = base_name
-                        dataset = AnalystDataset(name=dataset_name, data=data)
+                        dataset = AnalystDataset(name=dataset_name, data=excel_dataset)
                         await analyst_db.register_dataset(
                             dataset, DataSourceType.FILE, file_size=file_size
                         )
@@ -501,7 +490,7 @@ async def load_from_database(
 
     # Load the data from the database
     if data.table_names:
-        dataframes = await Database.get_data(
+        dataframes = await get_external_database().get_data(
             *data.table_names, analyst_db=analyst_db, sample_size=sample_size
         )
         dataset_names.extend(dataframes)
@@ -518,7 +507,7 @@ async def load_from_database(
 @router.get("/dictionaries")
 async def get_dictionaries(
     analyst_db: AnalystDB = Depends(get_initialized_db),
-) -> list[DataDictionary]:
+) -> list[DataDictionaryResponse]:
     # Get datasets from the database
     dataset_names = await analyst_db.list_analyst_datasets()
 
@@ -526,11 +515,13 @@ async def get_dictionaries(
     dictionaries = []
     for name in dataset_names:
         dictionary = await analyst_db.get_data_dictionary(name)
-        if dictionary:
-            dictionaries.append(dictionary)
+        if dictionary and len(dictionary.column_descriptions):
+            dictionaries.append(cast(DataDictionaryResponse, dictionary))
         else:
             dictionaries.append(
-                {"name": name, "column_descriptions": [], "in_progress": True}  # type: ignore[arg-type]
+                DataDictionaryResponse(
+                    name=name, column_descriptions=[], in_progress=True
+                )
             )
 
     return dictionaries if dictionaries else []
@@ -598,13 +589,11 @@ async def get_cleansed_dataset(
         if skip > 0 and cleansed_dataset.dataset.to_df().shape[0] > skip:
             # Create a new dataset with skipped rows
             skipped_df = cleansed_dataset.dataset.to_df().slice(skip, limit)
-            cleansed_dataset.dataset = AnalystDataset(
-                name=cleansed_dataset.name, data=skipped_df
-            )
+            cleansed_dataset.dataset = AnalystDataset(name=name, data=skipped_df)
         elif skip > 0:
             # If skip is greater than the number of rows, return an empty dataset
             cleansed_dataset.dataset = AnalystDataset(
-                name=cleansed_dataset.name,
+                name=name,
                 data=cleansed_dataset.dataset.to_df().slice(0, 0),
             )
 
@@ -725,7 +714,7 @@ async def get_chats(
         {
             "id": chat["id"],
             "name": chat["name"],
-            "data_source": chat.get("data_source", "registry"),
+            "data_source": chat.get("data_source", "catalog"),
             "created_at": chat["created_at"],
         }
         for chat in chat_list
@@ -1009,6 +998,40 @@ async def run_complete_analysis_task(
             break
         else:
             pass
+
+
+@router.get("/user/datarobot-account")
+async def get_datarobot_account(
+    request: Request,
+) -> dict[str, Any]:
+    api_token = request.state.session.datarobot_api_token
+    skoped_token = request.state.session.datarobot_api_skoped_token
+
+    truncated_api_token = None
+    if api_token:
+        truncated_api_token = f"****{api_token[-4:]}"
+
+    truncated_skoped_token = None
+    if skoped_token:
+        truncated_skoped_token = f"****{skoped_token[-4:]}"
+
+    return {
+        "datarobot_account_info": request.state.session.datarobot_account_info,
+        "datarobot_api_token": truncated_api_token,
+        "datarobot_api_skoped_token": truncated_skoped_token,
+    }
+
+
+@router.post("/user/datarobot-account")
+async def store_datarobot_account(
+    request: Request,
+) -> dict[str, Any]:
+    request_data = await request.json()
+
+    if "api_token" in request_data and request_data["api_token"]:
+        request.state.session.datarobot_api_token = request_data["api_token"]
+
+    return {"success": True}
 
 
 app.include_router(router)

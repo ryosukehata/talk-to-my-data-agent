@@ -39,7 +39,7 @@ logger = get_logger("ApplicationDB")
 
 # increment this number if the database schema has changed to prevent conflicts with existing deployments
 # this will force reinitialisation - all tables will be dropped
-ANALYST_DATABASE_VERSION = 3
+ANALYST_DATABASE_VERSION = 4
 
 
 class DatasetType(Enum):
@@ -1062,11 +1062,12 @@ class AnalystDB:
         self, name: str, max_rows: int | None = 10000
     ) -> CleansedDataset:
         data = AnalystDataset(
+            name=name,
             data=await self.dataset_handler.get_dataframe(
                 f"{name}_cleansed",
                 expected_type=DatasetType.CLEANSED,
                 max_rows=max_rows,
-            )
+            ),
         )
         cleansing_report = await self.dataset_handler.get_cleansing_report(name)
         return CleansedDataset(dataset=data, cleaning_report=cleansing_report)

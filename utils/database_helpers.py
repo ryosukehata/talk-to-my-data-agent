@@ -457,8 +457,7 @@ class BigQueryOperator(DatabaseOperator[BigQueryCredentialArgs]):
 
                 # Log detailed results
                 logger.info(f"Total objects found: {len(tables)}")
-                for table_name in tables:
-                    logger.info(f"Found {table_name}")
+                logger.info(f"Found tables: {', '.join(tables)}")
 
                 return tables
 
@@ -807,19 +806,31 @@ def get_database_operator(app_infra: AppInfra) -> DatabaseOperator[Any]:
         return NoDatabaseOperator(NoDatabaseCredentials())
 
 
-try:
-    with open("app_infra.json", "r") as infra_selection:
-        app_infra = AppInfra(**json.load(infra_selection))
-except (FileNotFoundError, ValidationError):
+def load_app_infra() -> AppInfra:
     try:
-        with open("frontend/app_infra.json", "r") as infra_selection:
+        with open("app_infra.json", "r") as infra_selection:
             app_infra = AppInfra(**json.load(infra_selection))
-    except (FileNotFoundError, ValidationError) as e:
-        raise ValueError(
-            "Failed to read app_infra.json.\n"
-            "If running locally, verify you have selected the correct "
-            "stack and that it is active using `pulumi stack output`.\n"
-            f"Ensure file is created by running `pulumi up`: {str(e)}"
-        ) from e
+        return app_infra
+    except (FileNotFoundError, ValidationError):
+        try:
+            with open("frontend/app_infra.json", "r") as infra_selection:
+                app_infra = AppInfra(**json.load(infra_selection))
+            return app_infra
+        except (FileNotFoundError, ValidationError):
+            try:
+                with open(
+                    "frontend_react/deploy/app_infra.json", "r"
+                ) as infra_selection:
+                    app_infra = AppInfra(**json.load(infra_selection))
+                return app_infra
+            except (FileNotFoundError, ValidationError) as e:
+                raise ValueError(
+                    "Failed to read app_infra.json.\n"
+                    "If running locally, verify you have selected the correct "
+                    "stack and that it is active using `pulumi stack output`.\n"
+                    f"Ensure file is created by running `pulumi up`: {str(e)}"
+                ) from e
 
-Database = get_database_operator(app_infra)
+
+def get_external_database() -> DatabaseOperator[Any]:
+    return get_database_operator(load_app_infra())

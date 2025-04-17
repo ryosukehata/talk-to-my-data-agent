@@ -42,7 +42,7 @@ from utils.api import (
     AnalysisGenerationError,
     run_complete_analysis,
 )
-from utils.database_helpers import app_infra
+from utils.database_helpers import load_app_infra
 from utils.logging_helper import get_logger
 from utils.schema import (
     AnalysisError,
@@ -57,6 +57,7 @@ from utils.schema import (
 
 warnings.filterwarnings("ignore")
 logger = get_logger("DataAnalystFrontend")
+app_infra = load_app_infra()
 
 # Custom CSS
 apply_custom_css()

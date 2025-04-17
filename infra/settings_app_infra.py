@@ -11,8 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
 import re
 import textwrap
+from pathlib import Path
 from typing import List, Sequence, Tuple
 
 import pulumi_datarobot as datarobot
@@ -25,7 +27,18 @@ from utils.credentials import SnowflakeCredentials
 
 from .settings_main import PROJECT_ROOT
 
-application_path = PROJECT_ROOT / "frontend"
+FRONTEND_PATHS = {
+    "react": Path("frontend_react") / "deploy",
+    "streamlit": Path("frontend"),
+}
+
+
+def get_frontend_path() -> Path:
+    frontend_type = os.environ.get("FRONTEND_TYPE", "streamlit")
+    return FRONTEND_PATHS[frontend_type]
+
+
+application_path = PROJECT_ROOT / get_frontend_path()
 
 app_source_args = ApplicationSourceArgs(
     resource_name=f"Data Analyst App Source [{PROJECT_NAME}]",

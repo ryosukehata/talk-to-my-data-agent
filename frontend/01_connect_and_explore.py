@@ -39,7 +39,7 @@ from utils.api import (
     log_memory,
     process_data_and_update_state,
 )
-from utils.database_helpers import Database, app_infra
+from utils.database_helpers import get_external_database, load_app_infra
 from utils.logging_helper import get_logger
 from utils.schema import (
     AnalystDataset,
@@ -51,6 +51,8 @@ from utils.schema import (
 warnings.filterwarnings("ignore")
 
 logger = get_logger("DataAnalystFrontend")
+app_infra = load_app_infra()
+Database = get_external_database()
 
 
 async def process_uploaded_file(file: UploadedFile) -> list[str]:
@@ -250,11 +252,16 @@ async def main() -> None:
                     format_func=lambda x: f"{x['name']} ({x['size']})",
                     help="You can select multiple datasets",
                     key="selected_registry_datasets",
+                    disabled=(
+                        "analyst_db" not in st.session_state
+                        or "datarobot_uid" not in st.session_state
+                    ),
                 )
 
                 # Form submit button
                 submit_button = st.form_submit_button(
                     "Load Datasets",
+                    disabled="analyst_db" not in st.session_state,
                 )
 
                 # Process form submission
@@ -276,12 +283,14 @@ async def main() -> None:
                     options=schema_tables,
                     help="You can select multiple tables",
                     key="selected_schema_tables",
+                    disabled="analyst_db" not in st.session_state,
                 )
 
                 # Form submit button
                 submit_button = st.form_submit_button(
                     "Load Selected Tables",
                     use_container_width=False,
+                    disabled="analyst_db" not in st.session_state,
                 )
 
                 if submit_button:

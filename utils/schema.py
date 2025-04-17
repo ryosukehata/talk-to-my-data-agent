@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Generator, Literal, Optional, TypedDict, Union
+from typing import Any, Callable, Generator, Literal, Optional, Union
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -41,6 +41,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from typing_extensions import TypedDict
 
 from .code_execution import MaxReflectionAttempts
 
@@ -239,6 +240,10 @@ class DataDictionary(BaseModel):
         )
 
 
+class DataDictionaryResponse(DataDictionary):
+    in_progress: bool = False
+
+
 class DictionaryGeneration(BaseModel):
     """Validates LLM responses for data dictionary generation
 
@@ -348,6 +353,23 @@ class AnalysisError(BaseModel):
                 if exception.exception_history is not None
                 else None
             ),
+        )
+
+    @classmethod
+    def from_value_error(
+        cls,
+        exception: ValueError,
+    ) -> "AnalysisError":
+        return AnalysisError(
+            exception_history=[
+                CodeExecutionError(
+                    exception_str=str(exception),
+                    traceback_str=None,
+                    code=None,
+                    stdout=str(exception),
+                    stderr=str(exception),
+                )
+            ],
         )
 
 

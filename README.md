@@ -18,6 +18,7 @@ This intuitive experience is designed for **scalability and flexibility**, ensur
 3. [Why build AI Apps with DataRobot app templates?](#why-build-ai-apps-with-datarobot-app-templates)
 4. [Data privacy](#data-privacy)
 5. [Make changes](#make-changes)
+   - [Change the frontend](#change-the-frontend)
    - [Change the LLM](#change-the-llm)
    - [Change the database](#change-the-database)
       * [Snowflake](#snowflake)
@@ -56,6 +57,7 @@ Codespace users can **skip steps 1 and 2**. For local development, follow all of
    OPENAI_API_BASE=...  # e.g. https://your_org.openai.azure.com/
    OPENAI_API_DEPLOYMENT_ID=...  # e.g. gpt-4o
    PULUMI_CONFIG_PASSPHRASE=...  # Required. Choose your own alphanumeric passphrase to be used for encrypting pulumi config
+   FRONTEND_TYPE=...  # Optional. Default is "streamlit". Set to "react" to use React frontend
    ```
    Use the following resources to locate the required credentials:
    - **DataRobot API Token**: Refer to the *Create a DataRobot API Key* section of the [DataRobot API Quickstart docs](https://docs.datarobot.com/en/docs/api/api-quickstart/index.html#create-a-datarobot-api-key).
@@ -86,6 +88,7 @@ App templates contain three families of complementary logic:
 - **App Logic**: Necessary for user consumption; whether via a hosted front-end or integrating into an external consumption layer.
   ```
   frontend/  # Streamlit frontend
+  frontend_react/  # React frontend alternative
   utils/  # App business logic & runtime helpers
   ```
 - **Operational Logic**: Necessary to activate DataRobot assets.
@@ -108,6 +111,31 @@ Your data privacy is important to us. Data handling is governed by the DataRobot
 
 
 ## Make changes
+
+### Change the frontend
+
+The Talk to My Data agent supports two frontend options:
+
+1. Streamlit frontend (default): A Python-based frontend with a simple interface
+2. React frontend: A modern JavaScript-based frontend with enhanced UI features
+
+To change the frontend:
+
+1. In `.env`: Set `FRONTEND_TYPE="react"` to use the React frontend instead of the default Streamlit frontend
+2. Run `pulumi up` to update your stack (Or rerun your quickstart)
+   ```bash
+   source set_env.sh  # On windows use `set_env.bat`
+   pulumi up
+   ```
+
+> **⚠️ Important note:**  
+> If you make changes to the React frontend code, you need to rebuild it before deploying:
+> ```bash
+> cd frontend_react/react_src
+> npm install
+> npm run build
+> ```
+> The built files will be placed in `frontend_react/deploy/dist/` which will be used by the deployment. See [React Frontend README](frontend_react/react_src/README.md) for more details on developing and building the React frontend.
 
 ### Change the LLM
 
