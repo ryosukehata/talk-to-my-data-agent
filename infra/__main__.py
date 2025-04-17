@@ -60,7 +60,9 @@ if settings_generative.LLM == LLMs.DEPLOYED_LLM:
 
 check_feature_flags(PROJECT_ROOT / "infra" / "feature_flag_requirements.yaml")
 
-with open(PROJECT_ROOT / "frontend/app_infra.json", "w") as infra_selection:
+with open(
+    settings_app_infra.application_path / "app_infra.json", "w"
+) as infra_selection:
     infra_selection.write(
         AppInfra(
             database=DATABASE_CONNECTION_TYPE,

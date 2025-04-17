@@ -106,6 +106,7 @@ class SnowflakeCredentials(DRCredentials):
         default=None,
         validation_alias=AliasChoices(
             AliasPath("MLOPS_RUNTIME_PARAM_db_credential", "payload", "username"),
+            "MLOPS_RUNTIME_PARAM_SNOWFLAKE_USER",
             "SNOWFLAKE_USER",
         ),
     )

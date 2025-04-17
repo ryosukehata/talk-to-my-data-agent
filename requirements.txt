@@ -1,7 +1,7 @@
 # infra
 pulumi==3.153.0
 pulumi-datarobot>=0.8.15,<0.9
-datarobot-pulumi-utils>=0.0.2.post1,<0.1
+datarobot-pulumi-utils>=0.0.2.post8,<0.1
 jinja2>=3.1.5,<4.0
 PyYAML>=6.0.2,<7.0
 
@@ -15,6 +15,7 @@ pytest>=8.3.4,<9.0
 pytest-cov>=6.0.0,<7.0
 pytest-mock>=3.14.0,<4.0
 pytest-asyncio>=0.25.2,<1.0
+pytest-httpx>=0.30.0,<0.31.0
 
 # genai testing
 rich>=13.9.4,<14.0

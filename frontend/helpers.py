@@ -16,6 +16,7 @@ import json
 import logging
 import sys
 import traceback
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import (
@@ -71,18 +72,32 @@ def state_empty() -> None:
     logger.info("Session state has been reset to its initial empty state.")
 
 
+def generate_user_id() -> str | None:
+    email_header = st.context.headers.get("x-user-email")
+    if email_header:
+        new_user_id = str(uuid.uuid5(uuid.NAMESPACE_OID, email_header))[:36]
+        return new_user_id
+    else:
+        return None
+
+
 async def state_init() -> None:
     if "initialized" not in st.session_state:
         state_empty()
+    user_id = None
     if "datarobot_uid" not in st.session_state:
-        logger.warning("datarobot-connect not initialised")
-        pass
+        user_id = generate_user_id()
     else:
+        user_id = st.session_state.datarobot_uid
+    if user_id:
         analyst_db = await AnalystDB.create(
-            user_id=st.session_state.datarobot_uid,
+            user_id=user_id,
             db_path=Path("/tmp"),
             dataset_db_name="datasets.db",
             chat_db_name="chat.db",
         )
 
         st.session_state.analyst_db = analyst_db
+    else:
+        logger.warning("datarobot-connect not initialised")
+        pass

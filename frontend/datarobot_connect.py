@@ -150,6 +150,7 @@ class DataRobotTokenManager:
             stc.write(f"Hello {username}")
 
         if not self._user_creds.token:
+            stc.warning("AI Catalog disabled. Please provide your API token")
             token = stc.text_input(
                 "API Token",
                 key="datarobot_api_token_provided",

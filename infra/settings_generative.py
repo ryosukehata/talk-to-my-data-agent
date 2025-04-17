@@ -23,7 +23,12 @@ from datarobot_pulumi_utils.schema.custom_models import (
     RegisteredModelArgs,
 )
 from datarobot_pulumi_utils.schema.exec_envs import RuntimeEnvironments
-from datarobot_pulumi_utils.schema.llms import LLMBlueprintArgs, LLMs, PlaygroundArgs
+from datarobot_pulumi_utils.schema.llms import (
+    LLMBlueprintArgs,
+    LLMs,
+    LLMSettings,
+    PlaygroundArgs,
+)
 
 from utils.schema import LLMDeploymentSettings
 
@@ -67,7 +72,7 @@ playground_args = PlaygroundArgs(
 llm_blueprint_args = LLMBlueprintArgs(
     resource_name=f"Generative Analyst LLM Blueprint [{PROJECT_NAME}]",
     llm_id=LLM.name,
-    llm_settings=datarobot.LlmBlueprintLlmSettingsArgs(
+    llm_settings=LLMSettings(
         max_completion_length=2048,
         temperature=0.1,
     ),

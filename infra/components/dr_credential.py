@@ -123,46 +123,60 @@ def get_credential_runtime_parameter_values(
     elif isinstance(credentials, NoDatabaseCredentials):
         credential_rtp_dicts = []  # No credentials to add for NoDatabaseCredentials
     elif isinstance(credentials, SnowflakeCredentials):
-        rtps = [
-            {
-                "key": "db_credential",
-                "type": "basic_credential",
-                "value": {
-                    "user": credentials.user,
-                    "password": credentials.password,
+        rtps = (
+            [
+                {
+                    "key": "db_credential",
+                    "type": "basic_credential",
+                    "value": {
+                        "user": credentials.user,
+                        "password": credentials.password,
+                    },
+                }
+            ]
+            if credentials.user and credentials.password
+            else [
+                {
+                    "key": "SNOWFLAKE_USER",
+                    "type": "string",
+                    "value": credentials.user,
+                }
+            ]
+        )
+        rtps.extend(
+            [
+                {
+                    "key": "SNOWFLAKE_ACCOUNT",
+                    "type": "string",
+                    "value": credentials.account,
                 },
-            },
-            {
-                "key": "SNOWFLAKE_ACCOUNT",
-                "type": "string",
-                "value": credentials.account,
-            },
-            {
-                "key": "SNOWFLAKE_WAREHOUSE",
-                "type": "string",
-                "value": credentials.warehouse,
-            },
-            {
-                "key": "SNOWFLAKE_DATABASE",
-                "type": "string",
-                "value": credentials.database,
-            },
-            {
-                "key": "SNOWFLAKE_SCHEMA",
-                "type": "string",
-                "value": credentials.db_schema,
-            },
-            {
-                "key": "SNOWFLAKE_ROLE",
-                "type": "string",
-                "value": credentials.role,
-            },
-            {
-                "key": "SNOWFLAKE_KEY_PATH",
-                "type": "string",
-                "value": credentials.snowflake_key_path,
-            },
-        ]
+                {
+                    "key": "SNOWFLAKE_WAREHOUSE",
+                    "type": "string",
+                    "value": credentials.warehouse,
+                },
+                {
+                    "key": "SNOWFLAKE_DATABASE",
+                    "type": "string",
+                    "value": credentials.database,
+                },
+                {
+                    "key": "SNOWFLAKE_SCHEMA",
+                    "type": "string",
+                    "value": credentials.db_schema,
+                },
+                {
+                    "key": "SNOWFLAKE_ROLE",
+                    "type": "string",
+                    "value": credentials.role,
+                },
+                {
+                    "key": "SNOWFLAKE_KEY_PATH",
+                    "type": "string",
+                    "value": credentials.snowflake_key_path,
+                },
+            ]
+        )
         credential_rtp_dicts = [rtp for rtp in rtps if rtp["value"] is not None]
     elif isinstance(credentials, SAPDatasphereCredentials):
         rtps = [
@@ -438,8 +452,16 @@ def get_database_credentials(
         if database == "snowflake":
             credentials = SnowflakeCredentials()
             if not credentials.is_configured():
-                logger.warning("Snowflake credentials not fully configured")
-                return NoDatabaseCredentials()
+                logger.error("Snowflake credentials not fully configured")
+                raise ValueError(
+                    textwrap.dedent(
+                        f"""
+                        Your Snowflake credentials and environment variables were not configured properly.
+                        
+                        Please validate your environment variables or check {__file__} for details.
+                        """
+                    )
+                )
 
             if test_credentials:
                 import snowflake.connector
@@ -460,17 +482,33 @@ def get_database_credentials(
                 elif credentials.password:
                     connect_params["password"] = credentials.password
                 else:
-                    logger.warning(
+                    logger.error(
                         "No valid authentication method configured for Snowflake"
                     )
-                    return NoDatabaseCredentials()
+                    raise ValueError(
+                        textwrap.dedent(
+                            f"""
+                            No authentication method was configured for Snowflake.
+
+                            Please validate your credentials or check {__file__} for details.
+                            """
+                        )
+                    )
 
                 try:
                     sf_con = snowflake.connector.connect(**connect_params)
                     sf_con.close()
                 except Exception as e:
-                    logger.warning(f"Failed to test Snowflake connection: {str(e)}")
-                    return NoDatabaseCredentials()
+                    logger.exception("Failed to test Snowflake connection")
+                    raise ValueError(
+                        textwrap.dedent(
+                            f"""
+                            Unable to run a successful test of snowflake with the given credentials.
+
+                            Please validate your credentials or check {__file__} for details.
+                            """
+                        )
+                    ) from e
 
             return credentials
 
@@ -511,7 +549,21 @@ def get_database_credentials(
 
     except pydantic.ValidationError as exc:
         msg = "Validation errors in database credentials. Using no database configuration.\n"
-        logger.warning(msg + str(exc))
-        return NoDatabaseCredentials()
+        logger.exception(msg)
+        raise ValueError(
+            textwrap.dedent(
+                f"""
+                There was an error validating the database credentials.
 
-    return NoDatabaseCredentials()
+                Please validate your credentials or check {__file__} for details.
+                """
+            )
+        ) from exc
+
+    raise ValueError(
+        textwrap.dedent(
+            f"""
+            The supplied database of {database} did not correspond to a supported database.
+            """
+        )
+    )
