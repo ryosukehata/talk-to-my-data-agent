@@ -23,6 +23,12 @@ from datarobot_pulumi_utils.pulumi.custom_model_deployment import CustomModelDep
 from datarobot_pulumi_utils.pulumi.proxy_llm_blueprint import ProxyLLMBlueprint
 from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
 from datarobot_pulumi_utils.schema.apps import CustomAppResourceBundles
+from datarobot_pulumi_utils.schema.guardrails import (
+    Condition,
+    GuardConditionComparator,
+    ModerationAction,
+    Stage,
+)
 from datarobot_pulumi_utils.schema.llms import LLMs
 
 sys.path.append("..")
@@ -136,6 +142,19 @@ elif settings_generative.LLM != LLMs.DEPLOYED_LLM:
         **settings_generative.llm_blueprint_args.model_dump(),
     )
 
+prompt_tokens = datarobot.CustomModelGuardConfigurationArgs(
+    name="Prompt Tokens",
+    template_name="Prompt Tokens",
+    stages=[Stage.PROMPT],
+    intervention=datarobot.CustomModelGuardConfigurationInterventionArgs(
+        action=ModerationAction.REPORT,
+        condition=Condition(
+            comparand="4096",
+            comparator=GuardConditionComparator.GREATER_THAN,
+        ).model_dump_json(),
+    ),
+)
+
 llm_custom_model = datarobot.CustomModel(
     **settings_generative.custom_model_args.model_dump(exclude_none=True),
     use_case_ids=[use_case.id],
@@ -143,6 +162,7 @@ llm_custom_model = datarobot.CustomModel(
     runtime_parameter_values=[]
     if settings_generative.LLM == LLMs.DEPLOYED_LLM
     else llm_runtime_parameter_values,
+    guard_configurations=[prompt_tokens],
 )
 
 llm_deployment = CustomModelDeployment(
