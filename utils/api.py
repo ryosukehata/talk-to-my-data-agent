@@ -21,6 +21,7 @@ import logging
 import re
 import sys
 import tempfile
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from types import ModuleType, TracebackType
@@ -42,7 +43,6 @@ import psutil
 import scipy
 import sklearn
 import statsmodels as sm
-from datarobot.client import RESTClientObject
 from joblib import Memory
 from openai import AsyncOpenAI
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
@@ -69,8 +69,8 @@ from utils.data_cleansing_helpers import (
     process_column,
 )
 from utils.database_helpers import get_external_database
+from utils.dr_helper import async_submit_actuals_to_datarobot, initialize_deployment
 from utils.logging_helper import get_logger, log_api_call
-from utils.resources import LLMDeployment
 from utils.schema import (
     AnalysisError,
     AnalystChatMessage,
@@ -114,23 +114,6 @@ def log_memory() -> None:
     logger.info(f"Memory usage: {memory:.2f} MB")
 
 
-def initialize_deployment() -> tuple[RESTClientObject, str]:
-    try:
-        dr_client = dr.Client()
-        chat_agent_deployment_id = LLMDeployment().id
-        deployment_chat_base_url = (
-            dr_client.endpoint + f"/deployments/{chat_agent_deployment_id}/"
-        )
-        return dr_client, deployment_chat_base_url
-    except ValidationError as e:
-        raise ValueError(
-            "Unable to load Deployment ID."
-            "If running locally, verify you have selected the correct "
-            "stack and that it is active using `pulumi stack output`. "
-            "If running in DataRobot, verify your runtime parameters have been set correctly."
-        ) from e
-
-
 class AsyncLLMClient:
     async def __aenter__(self) -> instructor.AsyncInstructor:
         dr_client, deployment_chat_base_url = initialize_deployment()
@@ -143,6 +126,7 @@ class AsyncLLMClient:
         self.client = instructor.from_openai(
             self.openai_client, mode=instructor.Mode.MD_JSON
         )
+        logger.info(f"Initialized witn deployment url: {deployment_chat_base_url}")
         return self.client
 
     async def __aexit__(
@@ -274,7 +258,10 @@ async def download_registry_datasets(
 
 
 async def _get_dictionary_batch(
-    columns: list[str], df: pl.DataFrame, batch_size: int = 5
+    columns: list[str],
+    df: pl.DataFrame,
+    batch_size: int = 5,
+    telemetry_json: dict[str, Any] | None = None,
 ) -> list[DataDictionaryColumn]:
     """Process a batch of columns to get their descriptions"""
 
@@ -351,7 +338,10 @@ async def _get_dictionary_batch(
         )
         # Get descriptions from OpenAI
         async with AsyncLLMClient() as client:
-            completion: DictionaryGeneration = await client.chat.completions.create(
+            (
+                completion,
+                completion_org,
+            ) = await client.chat.completions.create_with_completion(
                 response_model=DictionaryGeneration,
                 model=ALTERNATIVE_LLM_SMALL,
                 messages=messages,
@@ -359,6 +349,19 @@ async def _get_dictionary_batch(
 
         # Convert to dictionary format
         descriptions = completion.to_dict()
+        association_id = completion_org.datarobot_moderations["association_id"]
+        logger.info(f"Association ID: {association_id}")
+
+        if telemetry_json is not None:
+            # add query type to telemetry
+            telemetry_send = deepcopy(telemetry_json)
+            telemetry_send["query_type"] = "00_generate_code_database"
+            # submit telemetry
+            asyncio.create_task(
+                async_submit_actuals_to_datarobot(
+                    association_id=association_id, telemetry_json=telemetry_send
+                )
+            )
 
         # Only return descriptions for requested columns
         return [
@@ -470,7 +473,9 @@ def _validate_question_feasibility(
 
 @log_api_call
 async def suggest_questions(
-    datasets: list[AnalystDataset], max_columns: int = 40
+    datasets: list[AnalystDataset],
+    max_columns: int = 40,
+    telemetry_json: dict[str, Any] | None = None,
 ) -> list[ValidatedQuestion]:
     """Generate and validate suggested analysis questions
 
@@ -529,7 +534,10 @@ async def suggest_questions(
         ),
     ]
     async with AsyncLLMClient() as client:
-        completion: QuestionListGeneration = await client.chat.completions.create(
+        (
+            completion,
+            completion_org,
+        ) = await client.chat.completions.create_with_completion(
             response_model=QuestionListGeneration,
             model=ALTERNATIVE_LLM_SMALL,
             messages=messages,
@@ -543,6 +551,19 @@ async def suggest_questions(
         if validated_question is not None:
             validated_questions.append(validated_question)
 
+    association_id = completion_org.datarobot_moderations["association_id"]
+    logger.info(f"Association ID: {association_id}")
+
+    if telemetry_json is not None:
+        # add query type to telemetry
+        telemetry_send = deepcopy(telemetry_json)
+        telemetry_send["query_type"] = "99_generate_suggested_questions"
+        # submit telemetry
+        asyncio.create_task(
+            async_submit_actuals_to_datarobot(
+                association_id=association_id, telemetry_json=telemetry_send
+            )
+        )
     return validated_questions
 
 
@@ -616,6 +637,7 @@ def get_tools() -> list[Tool]:
 async def _generate_run_charts_python_code(
     request: RunChartsRequest,
     validation_error: InvalidGeneratedCode | None = None,
+    telemetry_json: dict[str, Any] | None = None,
 ) -> str:
     df = request.dataset.to_df().to_pandas()
     question = request.question
@@ -658,11 +680,23 @@ async def _generate_run_charts_python_code(
 
     # Get response based on model mode
     async with AsyncLLMClient() as client:
-        response: CodeGeneration = await client.chat.completions.create(
+        response, response_org = await client.chat.completions.create_with_completion(
             response_model=CodeGeneration,
             model=ALTERNATIVE_LLM_BIG,
             temperature=0,
             messages=messages,
+        )
+    association_id = response_org.datarobot_moderations["association_id"]
+    logger.info(f"Association ID: {association_id}")
+    if telemetry_json is not None:
+        # add query type to telemetry
+        telemetry_send = deepcopy(telemetry_json)
+        telemetry_send["query_type"] = "03_generate_run_charts_python_code"
+        # submit telemetry
+        asyncio.create_task(
+            async_submit_actuals_to_datarobot(
+                association_id=association_id, telemetry_json=telemetry_send
+            )
         )
     return response.code
 
@@ -672,6 +706,7 @@ async def _generate_run_analysis_python_code(
     analyst_db: AnalystDB,
     validation_error: InvalidGeneratedCode | None = None,
     attempt: int = 0,
+    telemetry_json: dict[str, Any] | None = None,
 ) -> str:
     """
     Generate Python analysis code based on JSON data and question.
@@ -788,12 +823,28 @@ async def _generate_run_analysis_python_code(
     logger.info("Running Code Gen")
     logger.debug(messages)
     async with AsyncLLMClient() as client:
-        completion: CodeGeneration = await client.chat.completions.create(
+        (
+            completion,
+            completion_org,
+        ) = await client.chat.completions.create_with_completion(
             response_model=CodeGeneration,
             model=ALTERNATIVE_LLM_BIG,
             temperature=0.1,
             messages=messages,
             max_retries=10,
+        )
+    association_id = completion_org.datarobot_moderations["association_id"]
+    logger.info(f"Association ID: {association_id}")
+
+    if telemetry_json is not None:
+        # add query type to telemetry
+        telemetry_send = deepcopy(telemetry_json)
+        telemetry_send["query_type"] = "02_generate_code_file"
+        # submit telemetry
+        asyncio.create_task(
+            async_submit_actuals_to_datarobot(
+                association_id=association_id, telemetry_json=telemetry_send
+            )
         )
     logger.info("Code Gen complete")
     return completion.code
@@ -841,7 +892,9 @@ async def cleanse_dataframe(dataset: AnalystDataset) -> CleansedDataset:
 
 
 @log_api_call
-async def rephrase_message(messages: ChatRequest) -> str:
+async def rephrase_message(
+    messages: ChatRequest, telemetry_json: dict[str, Any] | None = None
+) -> str:
     """Process chat messages history and return a new question
 
     Args:
@@ -866,12 +919,27 @@ async def rephrase_message(messages: ChatRequest) -> str:
         ),
     ]
     async with AsyncLLMClient() as client:
-        completion: EnhancedQuestionGeneration = await client.chat.completions.create(
+        (
+            completion,
+            completion_org,
+        ) = await client.chat.completions.create_with_completion(
             response_model=EnhancedQuestionGeneration,
             model=ALTERNATIVE_LLM_BIG,
             messages=prompt_messages,
         )
+    association_id = completion_org.datarobot_moderations["association_id"]
+    logger.info(f"Association ID: {association_id}")
 
+    if telemetry_json is not None:
+        # add query type to telemetry
+        telemetry_send = deepcopy(telemetry_json)
+        telemetry_send["query_type"] = "01_rephrase"
+        # submit telemetry
+        asyncio.create_task(
+            async_submit_actuals_to_datarobot(
+                association_id=association_id, telemetry_json=telemetry_send
+            )
+        )
     return completion.enhanced_user_message
 
 
@@ -879,6 +947,7 @@ async def rephrase_message(messages: ChatRequest) -> str:
 async def _run_charts(
     request: RunChartsRequest,
     exception_history: list[InvalidGeneratedCode] | None = None,
+    telemetry_json: dict[str, Any] | None = None,
 ) -> RunChartsResult:
     """Generate and validate chart code with retry logic"""
     # Create messages for OpenAI
@@ -892,7 +961,9 @@ async def _run_charts(
         exception_history = []
 
     code = await _generate_run_charts_python_code(
-        request, next(iter(exception_history[::-1]), None)
+        request,
+        next(iter(exception_history[::-1]), None),
+        telemetry_json=telemetry_json,
     )
     try:
         result = execute_python(
@@ -939,10 +1010,12 @@ async def _run_charts(
 
 
 @log_api_call
-async def run_charts(request: RunChartsRequest) -> RunChartsResult:
+async def run_charts(
+    request: RunChartsRequest, telemetry_json: dict[str, Any] | None = None
+) -> RunChartsResult:
     """Execute analysis workflow on datasets."""
     try:
-        chart_result = await _run_charts(request)
+        chart_result = await _run_charts(request, telemetry_json=telemetry_json)
         return chart_result
     except ValidationError:
         return RunChartsResult(
@@ -962,6 +1035,7 @@ async def run_charts(request: RunChartsRequest) -> RunChartsResult:
 @log_api_call
 async def get_business_analysis(
     request: GetBusinessAnalysisRequest,
+    telemetry_json: dict[str, Any] | None = None,
 ) -> GetBusinessAnalysisResult:
     """
     Generate business analysis based on data and question.
@@ -999,12 +1073,26 @@ async def get_business_analysis(
             ),
         ]
         async with AsyncLLMClient() as client:
-            completion: BusinessAnalysisGeneration = (
-                await client.chat.completions.create(
-                    response_model=BusinessAnalysisGeneration,
-                    model=ALTERNATIVE_LLM_BIG,
-                    temperature=0.1,
-                    messages=messages,
+            (
+                completion,
+                completion_org,
+            ) = await client.chat.completions.create_with_completion(
+                response_model=BusinessAnalysisGeneration,
+                model=ALTERNATIVE_LLM_BIG,
+                temperature=0.1,
+                messages=messages,
+            )
+        association_id = completion_org.datarobot_moderations["association_id"]
+        logger.info(f"Association ID: {association_id}")
+
+        if telemetry_json is not None:
+            # add query type to telemetry
+            telemetry_send = deepcopy(telemetry_json)
+            telemetry_send["query_type"] = "03_generate_business_analysis"
+            # submit telemetry
+            asyncio.create_task(
+                async_submit_actuals_to_datarobot(
+                    association_id=association_id, telemetry_json=telemetry_send
                 )
             )
         duration = (datetime.now() - start).total_seconds()
@@ -1038,6 +1126,7 @@ async def _run_analysis(
     request: RunAnalysisRequest,
     analyst_db: AnalystDB,
     exception_history: list[InvalidGeneratedCode] | None = None,
+    telemetry_json: dict[str, Any] | None = None,
 ) -> RunAnalysisResult:
     start_time = datetime.now()
 
@@ -1052,6 +1141,7 @@ async def _run_analysis(
         analyst_db,
         next(iter(exception_history[::-1]), None),
         attempt=len(exception_history),
+        telemetry_json=telemetry_json,
     )
     logger.info("Code generated, preparing execution")
     dataframes: dict[str, pl.DataFrame] = {}
@@ -1125,12 +1215,15 @@ async def _run_analysis(
 async def run_analysis(
     request: RunAnalysisRequest,
     analyst_db: AnalystDB,
+    telemetry_json: dict[str, Any],
 ) -> RunAnalysisResult:
     """Execute analysis workflow on datasets."""
     logger.debug("Entering run_analysis")
     log_memory()
     try:
-        return await _run_analysis(request, analyst_db=analyst_db)
+        return await _run_analysis(
+            request, analyst_db=analyst_db, telemetry_json=telemetry_json
+        )
     except MaxReflectionAttempts as e:
         return RunAnalysisResult(
             status="error",
@@ -1155,6 +1248,7 @@ async def _generate_database_analysis_code(
     request: RunDatabaseAnalysisRequest,
     analyst_db: AnalystDB,
     validation_error: InvalidGeneratedCode | None = None,
+    telemetry_json: dict[str, Any] | None = None,
 ) -> str:
     """
     Generate Snowflake SQL analysis code based on data samples and question.
@@ -1216,13 +1310,28 @@ async def _generate_database_analysis_code(
 
     # Get response from OpenAI
     async with AsyncLLMClient() as client:
-        completion = await client.chat.completions.create(
+        (
+            completion,
+            completion_org,
+        ) = await client.chat.completions.create_with_completion(
             response_model=DatabaseAnalysisCodeGeneration,
             model=ALTERNATIVE_LLM_BIG,
             temperature=0.1,
             messages=messages,
         )
+    association_id = completion_org.datarobot_moderations["association_id"]
+    logger.info(f"Association ID: {association_id}")
 
+    if telemetry_json is not None:
+        # add query type to telemetry
+        telemetry_send = deepcopy(telemetry_json)
+        telemetry_send["query_type"] = "02_generate_code_database"
+        # submit telemetry
+        asyncio.create_task(
+            async_submit_actuals_to_datarobot(
+                association_id=association_id, telemetry_json=telemetry_send
+            )
+        )
     return completion.code
 
 
@@ -1231,6 +1340,7 @@ async def _run_database_analysis(
     request: RunDatabaseAnalysisRequest,
     analyst_db: AnalystDB,
     exception_history: list[InvalidGeneratedCode] | None = None,
+    telemetry_json: dict[str, Any] | None = None,
 ) -> RunDatabaseAnalysisResult:
     start_time = datetime.now()
     if not request.dataset_names:
@@ -1240,7 +1350,7 @@ async def _run_database_analysis(
         exception_history = []
 
     sql_code = await _generate_database_analysis_code(
-        request, analyst_db, next(iter(exception_history[::-1]), None)
+        request, analyst_db, next(iter(exception_history[::-1]), None), telemetry_json
     )
     try:
         results = get_external_database().execute_query(query=sql_code)
@@ -1268,11 +1378,13 @@ async def _run_database_analysis(
 
 @log_api_call
 async def run_database_analysis(
-    request: RunDatabaseAnalysisRequest, analyst_db: AnalystDB
+    request: RunDatabaseAnalysisRequest,
+    analyst_db: AnalystDB,
+    telemetry_json: dict[str, Any],
 ) -> RunDatabaseAnalysisResult:
     """Execute analysis workflow on datasets."""
     try:
-        return await _run_database_analysis(request, analyst_db)
+        return await _run_database_analysis(request, analyst_db, telemetry_json)
     except MaxReflectionAttempts as e:
         return RunDatabaseAnalysisResult(
             status="error",
@@ -1296,6 +1408,7 @@ async def execute_business_analysis_and_charts(
     enhanced_message: str,
     enable_chart_generation: bool = True,
     enable_business_insights: bool = True,
+    telemetry_json: dict[str, Any] | None = None,
 ) -> tuple[
     RunChartsResult | BaseException | None,
     GetBusinessAnalysisResult | BaseException | None,
@@ -1316,17 +1429,19 @@ async def execute_business_analysis_and_charts(
     if enable_chart_generation and enable_business_insights:
         # Run both analyses concurrently
         result = await asyncio.gather(
-            run_charts(chart_request),
-            get_business_analysis(business_request),
+            run_charts(chart_request, telemetry_json=telemetry_json),
+            get_business_analysis(business_request, telemetry_json=telemetry_json),
             return_exceptions=True,
         )
 
         return (result[0], result[1])
     elif enable_chart_generation:
-        charts_result = await run_charts(chart_request)
+        charts_result = await run_charts(chart_request, telemetry_json=telemetry_json)
         return charts_result, None
     else:
-        business_result = await get_business_analysis(business_request)
+        business_result = await get_business_analysis(
+            business_request, telemetry_json=telemetry_json
+        )
         return None, business_result
 
 
@@ -1338,11 +1453,19 @@ async def run_complete_analysis(
     chat_id: str,
     enable_chart_generation: bool = True,
     enable_business_insights: bool = True,
+    telemetry_json: dict[str, Any] | None = None,
 ) -> AsyncGenerator[Component | AnalysisGenerationError, None]:
     # Get enhanced message
+    if telemetry_json is not None:
+        telemetry_json["chat_id"] = chat_id
+        telemetry_json["chat_seq"] = len(chat_request.messages)
+        telemetry_json["data_source"] = data_source.value
+        telemetry_json["datasets_names"] = datasets_names
+        telemetry_json["enable_chart_generation"] = enable_chart_generation
+        telemetry_json["enable_business_insights"] = enable_business_insights
     try:
         logger.info("Getting rephrased question...")
-        enhanced_message = await rephrase_message(chat_request)
+        enhanced_message = await rephrase_message(chat_request, telemetry_json)
         logger.info("Getting rephrased question done")
         yield enhanced_message
     except ValidationError:
@@ -1383,6 +1506,7 @@ async def run_complete_analysis(
                     question=enhanced_message,
                 ),
                 analyst_db,
+                telemetry_json=telemetry_json,
             )
         else:
             analysis_result = await run_analysis(
@@ -1391,6 +1515,7 @@ async def run_complete_analysis(
                     question=enhanced_message,
                 ),
                 analyst_db,
+                telemetry_json=telemetry_json,
             )
 
         log_memory()
@@ -1452,6 +1577,7 @@ async def run_complete_analysis(
             enhanced_message,
             enable_business_insights=enable_business_insights,
             enable_chart_generation=enable_chart_generation,
+            telemetry_json=telemetry_json,
         )
 
         # Handle chart results
