@@ -287,6 +287,7 @@ async def run_complete_analysis_st(
             ]
             telemetry_json = {
                 "user_email": st.session_state.user_email,
+                "user_msg": chat_request.messages[-1]["content"],
             }
             run_analysis_iterator = run_complete_analysis(
                 chat_request=chat_request,
