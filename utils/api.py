@@ -1350,7 +1350,10 @@ async def _run_database_analysis(
         exception_history = []
 
     sql_code = await _generate_database_analysis_code(
-        request, analyst_db, next(iter(exception_history[::-1]), None), telemetry_json
+        request,
+        analyst_db,
+        next(iter(exception_history[::-1]), None),
+        telemetry_json=telemetry_json,
     )
     try:
         results = get_external_database().execute_query(query=sql_code)
@@ -1384,7 +1387,9 @@ async def run_database_analysis(
 ) -> RunDatabaseAnalysisResult:
     """Execute analysis workflow on datasets."""
     try:
-        return await _run_database_analysis(request, analyst_db, telemetry_json)
+        return await _run_database_analysis(
+            request, analyst_db, telemetry_json=telemetry_json
+        )
     except MaxReflectionAttempts as e:
         return RunDatabaseAnalysisResult(
             status="error",
