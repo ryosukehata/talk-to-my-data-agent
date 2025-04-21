@@ -134,11 +134,17 @@ async def registry_download_callback() -> None:
                     dataframes = await download_registry_datasets(
                         selected_ids, st.session_state.analyst_db
                     )
+                telemetry_json = {
+                    "user_email": st.session_state.user_email,
+                    "data_source": st.session_state.data_source.value,
+                    "query_type": "00_registry_download_callback",
+                }
 
                 async for message in process_data_and_update_state(
                     dataframes,
                     st.session_state.analyst_db,
                     st.session_state.data_source,
+                    telemetry_json,
                 ):
                     st.toast(message)
 
@@ -161,11 +167,16 @@ async def load_from_database_callback() -> None:
                 if not dataframes:
                     st.error(f"Failed to load data from {app_infra.database}")
                     return
-
+                telemetry_json = {
+                    "user_email": st.session_state.user_email,
+                    "data_source": st.session_state.data_source.value,
+                    "query_type": "00_load_from_database_callback",
+                }
                 async for message in process_data_and_update_state(
                     dataframes,
                     st.session_state.analyst_db,
                     st.session_state.data_source,
+                    telemetry_json,
                 ):
                     st.toast(message)
 
@@ -184,10 +195,17 @@ async def uploaded_file_callback(uploaded_files: list[UploadedFile]) -> None:
                 dataset_results = await process_uploaded_file(file)
                 logger.info("Initiating Data cleansing and dictionary")
                 log_memory()
+
+                telemetry_json = {
+                    "user_email": st.session_state.user_email,
+                    "data_source": st.session_state.data_source.value,
+                    "query_type": "00_uploaded_file_callback",
+                }
                 async for message in process_data_and_update_state(
                     dataset_results,
                     st.session_state.analyst_db,
                     st.session_state.data_source,
+                    telemetry_json,
                 ):
                     st.toast(message)
                 logger.info("Done with processing files")

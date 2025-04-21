@@ -353,13 +353,11 @@ async def _get_dictionary_batch(
         logger.info(f"Association ID: {association_id}")
 
         if telemetry_json is not None:
-            # add query type to telemetry
-            telemetry_send = deepcopy(telemetry_json)
-            telemetry_send["query_type"] = "00_generate_code_database"
+            # query type added in parent function
             # submit telemetry
             asyncio.create_task(
                 async_submit_actuals_to_datarobot(
-                    association_id=association_id, telemetry_json=telemetry_send
+                    association_id=association_id, telemetry_json=telemetry_json
                 )
             )
 
@@ -386,7 +384,9 @@ async def _get_dictionary_batch(
 
 
 @log_api_call
-async def get_dictionary(dataset: AnalystDataset) -> DataDictionary:
+async def get_dictionary(
+    dataset: AnalystDataset, telemetry_json: dict[str, Any] | None = None
+) -> DataDictionary:
     """Process a single dataset with parallel column batch processing"""
 
     try:
@@ -416,7 +416,7 @@ async def get_dictionary(dataset: AnalystDataset) -> DataDictionary:
         )
 
         tasks = [
-            _get_dictionary_batch(batch, df, DICTIONARY_BATCH_SIZE)
+            _get_dictionary_batch(batch, df, DICTIONARY_BATCH_SIZE, telemetry_json)
             for batch in column_batches
         ]
 
@@ -557,7 +557,7 @@ async def suggest_questions(
     if telemetry_json is not None:
         # add query type to telemetry
         telemetry_send = deepcopy(telemetry_json)
-        telemetry_send["query_type"] = "99_generate_suggested_questions"
+        telemetry_send["query_type"] = "01_generate_suggested_questions"
         # submit telemetry
         asyncio.create_task(
             async_submit_actuals_to_datarobot(
@@ -691,7 +691,7 @@ async def _generate_run_charts_python_code(
     if telemetry_json is not None:
         # add query type to telemetry
         telemetry_send = deepcopy(telemetry_json)
-        telemetry_send["query_type"] = "03_generate_run_charts_python_code"
+        telemetry_send["query_type"] = "04_generate_run_charts_python_code"
         # submit telemetry
         asyncio.create_task(
             async_submit_actuals_to_datarobot(
@@ -839,7 +839,7 @@ async def _generate_run_analysis_python_code(
     if telemetry_json is not None:
         # add query type to telemetry
         telemetry_send = deepcopy(telemetry_json)
-        telemetry_send["query_type"] = "02_generate_code_file"
+        telemetry_send["query_type"] = "03_generate_code_file"
         # submit telemetry
         asyncio.create_task(
             async_submit_actuals_to_datarobot(
@@ -933,7 +933,7 @@ async def rephrase_message(
     if telemetry_json is not None:
         # add query type to telemetry
         telemetry_send = deepcopy(telemetry_json)
-        telemetry_send["query_type"] = "01_rephrase"
+        telemetry_send["query_type"] = "02_rephrase"
         # submit telemetry
         asyncio.create_task(
             async_submit_actuals_to_datarobot(
@@ -1088,7 +1088,7 @@ async def get_business_analysis(
         if telemetry_json is not None:
             # add query type to telemetry
             telemetry_send = deepcopy(telemetry_json)
-            telemetry_send["query_type"] = "03_generate_business_analysis"
+            telemetry_send["query_type"] = "04_generate_business_analysis"
             # submit telemetry
             asyncio.create_task(
                 async_submit_actuals_to_datarobot(
@@ -1325,7 +1325,7 @@ async def _generate_database_analysis_code(
     if telemetry_json is not None:
         # add query type to telemetry
         telemetry_send = deepcopy(telemetry_json)
-        telemetry_send["query_type"] = "02_generate_code_database"
+        telemetry_send["query_type"] = "03_generate_code_database"
         # submit telemetry
         asyncio.create_task(
             async_submit_actuals_to_datarobot(
@@ -1640,6 +1640,7 @@ async def process_data_and_update_state(
     new_dataset_names: list[str],
     analyst_db: AnalystDB,
     data_source: str | DataSourceType,
+    telemetry_json: dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Process datasets and yield progress updates asynchronously."""
     # Start processing and yield initial message
@@ -1701,7 +1702,7 @@ async def process_data_and_update_state(
                 pass
             logger.info(f"Creating dictionary for dataset: {analysis_dataset_name}")
             analysis_dataset = await analyst_db.get_dataset(analysis_dataset_name)
-            new_dictionary = await get_dictionary(analysis_dataset)
+            new_dictionary = await get_dictionary(analysis_dataset, telemetry_json)
             logger.info(new_dictionary.to_application_df())
             del analysis_dataset
             await analyst_db.register_data_dictionary(new_dictionary)

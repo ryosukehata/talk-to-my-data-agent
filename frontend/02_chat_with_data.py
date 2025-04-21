@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import asyncio
-import json
 import sys
 import time
 import uuid
