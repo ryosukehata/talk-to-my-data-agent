@@ -76,7 +76,8 @@ and `pulumi` invocation see [here](#setup-for-advanced-users).
 
 ## Architecture overview
 
-![image](https://github.com/user-attachments/assets/2ca66231-9321-48fe-abdb-f2d35687dff6)
+![image](https://github.com/user-attachments/assets/1ec64b87-184f-4da1-b633-e4d464fcf4dd)
+
 
 
 App templates contain three families of complementary logic:
