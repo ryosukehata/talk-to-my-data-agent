@@ -23,12 +23,6 @@ from datarobot_pulumi_utils.pulumi.custom_model_deployment import CustomModelDep
 from datarobot_pulumi_utils.pulumi.proxy_llm_blueprint import ProxyLLMBlueprint
 from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
 from datarobot_pulumi_utils.schema.apps import CustomAppResourceBundles
-from datarobot_pulumi_utils.schema.guardrails import (
-    Condition,
-    GuardConditionComparator,
-    ModerationAction,
-    Stage,
-)
 from datarobot_pulumi_utils.schema.llms import LLMs
 
 sys.path.append("..")
@@ -38,6 +32,7 @@ from settings_main import PROJECT_ROOT
 from infra import (
     settings_app_infra,
     settings_generative,
+    settings_job_infra,
 )
 from infra.components.dr_credential import (
     get_credential_runtime_parameter_values,
@@ -46,6 +41,10 @@ from infra.components.dr_credential import (
 )
 from infra.settings_database import DATABASE_CONNECTION_TYPE
 from infra.settings_proxy_llm import CHAT_MODEL_NAME
+from utils.custom_job_helper import (
+    delete_all_custom_job_schedule,
+    get_custom_job_by_name,
+)
 from utils.resources import (
     app_env_name,
     llm_deployment_env_name,
@@ -144,18 +143,6 @@ elif settings_generative.LLM != LLMs.DEPLOYED_LLM:
         **settings_generative.llm_blueprint_args.model_dump(),
     )
 
-prompt_tokens = datarobot.CustomModelGuardConfigurationArgs(
-    name="Prompt Tokens",
-    template_name="Prompt Tokens",
-    stages=[Stage.PROMPT],
-    intervention=datarobot.CustomModelGuardConfigurationInterventionArgs(
-        action=ModerationAction.REPORT,
-        condition=Condition(
-            comparand="4096",
-            comparator=GuardConditionComparator.GREATER_THAN,
-        ).model_dump_json(),
-    ),
-)
 
 llm_custom_model = datarobot.CustomModel(
     **settings_generative.custom_model_args.model_dump(exclude_none=True),
@@ -164,7 +151,7 @@ llm_custom_model = datarobot.CustomModel(
     runtime_parameter_values=[]
     if settings_generative.LLM == LLMs.DEPLOYED_LLM
     else llm_runtime_parameter_values,
-    guard_configurations=[prompt_tokens],
+    guard_configurations=settings_job_infra.guardrails,
 )
 
 llm_deployment = CustomModelDeployment(
@@ -225,3 +212,109 @@ pulumi.export(
     settings_app_infra.app_resource_name,
     app.application_url,
 )
+
+dataset_trace = datarobot.DatasetFromFile(
+    "dataset_trace",
+    file_path=settings_job_infra.dataset_trace_path,
+    use_case_ids=[use_case.id],
+)
+dataset_access_log = datarobot.DatasetFromFile(
+    "dataset_access_log",
+    file_path=settings_job_infra.dataset_access_log_path,
+    use_case_ids=[use_case.id],
+)
+
+# Dataset outputs
+pulumi.export(settings_job_infra.dataset_trace_name, dataset_trace.id)
+pulumi.export(settings_job_infra.dataset_access_log_name, dataset_access_log.id)
+
+
+# set the runtime parameters
+job_runtime_parameters = [
+    datarobot.ApplicationSourceRuntimeParameterValueArgs(
+        key=key,
+        type="string",
+        value=value,
+    )
+    for key, value in {
+        "LLM_DEPLOYMENT_ID": llm_deployment.id,
+        "APP_ID": app.id,
+        "TRACE_ID": dataset_trace.id,
+        "ACCESS_LOG_ID": dataset_access_log.id,
+        "MODE": "append",
+    }.items()
+]
+
+
+class CustomJobScheduleCleanup(pulumi.ComponentResource):
+    def __init__(self, name, custom_job_name, opts=None):
+        super().__init__("custom:resource:CustomJobScheduleCleanup", name, {}, opts)
+        self.cleanup_done = pulumi.Output.from_input(custom_job_name).apply(
+            self._delete_schedules_if_exists
+        )
+        self.register_outputs({"cleanup_done": self.cleanup_done})
+
+    def _delete_schedules_if_exists(self, job_name):
+        job = get_custom_job_by_name(job_name)
+        if job is None:
+            # Job does not exist, skip deletion
+            return True
+        job_id = job["id"]
+        delete_all_custom_job_schedule(job_id)
+        return True
+
+
+# Cleanup schedules before updating/creating custom_job
+cleanup = CustomJobScheduleCleanup(
+    "custom-job-schedule-cleanup", settings_job_infra.job_resource_name
+)
+
+custom_job = datarobot.CustomJob(
+    resource_name=settings_job_infra.job_resource_name,
+    name=settings_job_infra.job_resource_name,
+    environment_id=settings_job_infra.base_environment_id,
+    files=settings_job_infra.get_job_files(job_runtime_parameters),
+    runtime_parameter_values=job_runtime_parameters,
+    resource_bundle_id=settings_job_infra.resource_bundle_id,
+    job_type="default",
+    opts=pulumi.ResourceOptions(depends_on=[cleanup]),
+)
+
+pulumi.export(settings_job_infra.job_resource_name, custom_job.id)
+pulumi.export("CUSTOM_JOB_ID", custom_job.id)
+
+
+class CustomJobPostActions(pulumi.ComponentResource):
+    def __init__(self, name, custom_job_id, opts=None):
+        super().__init__(
+            "custom:resource:CustomJobPostActions",
+            name,
+            {"custom_job_id": custom_job_id},
+            opts,
+        )
+        # Run the custom job once
+        self.custom_run_id = custom_job_id.apply(
+            lambda id: settings_job_infra.run_job_once(id)
+        )
+        # Create the schedule
+        self.schedule_id = custom_job_id.apply(
+            lambda id: settings_job_infra.create_job_schedule(id)
+        )
+        # Register outputs for stack export
+        self.register_outputs(
+            {
+                "custom_run_id": self.custom_run_id,
+                "schedule_id": self.schedule_id,
+            }
+        )
+
+
+# Post-actions after custom_job is fully created/updated
+post_actions = CustomJobPostActions(
+    "custom-job-post-actions",
+    custom_job.id,
+    opts=pulumi.ResourceOptions(depends_on=[custom_job]),
+)
+
+pulumi.export("CUSTOM_JOB_RUN_ID", post_actions.custom_run_id)
+pulumi.export("CUSTOM_JOB_SCHEDULE_ID", post_actions.schedule_id)

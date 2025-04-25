@@ -1,0 +1,17 @@
+name: runtime-params
+
+runtimeParameterDefinitions:
+- fieldName: LLM_DEPLOYMENT_ID
+  type: string
+
+- fieldName: APP_ID
+  type: string
+
+- fieldName: TRACE_ID
+  type: string
+
+- fieldName: ACCESS_LOG_ID
+  type: string
+
+- fieldName: MODE
+  type: string
