@@ -4,13 +4,13 @@ runtimeParameterDefinitions:
 - fieldName: LLM_DEPLOYMENT_ID
   type: string
 
-- fieldName: APP_ID
+- fieldName: DATAROBOT_APPLICATION_ID
   type: string
 
-- fieldName: TRACE_ID
+- fieldName: DATASET_TRACE_ID
   type: string
 
-- fieldName: ACCESS_LOG_ID
+- fieldName: DATASET_ACCESS_LOG_ID
   type: string
 
 - fieldName: MODE

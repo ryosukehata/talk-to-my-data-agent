@@ -226,7 +226,9 @@ dataset_access_log = datarobot.DatasetFromFile(
 
 # Dataset outputs
 pulumi.export(settings_job_infra.dataset_trace_name, dataset_trace.id)
+pulumi.export("DATASET_TRACE_ID", dataset_trace.id)
 pulumi.export(settings_job_infra.dataset_access_log_name, dataset_access_log.id)
+pulumi.export("DATASET_ACCESS_LOG_ID", dataset_access_log.id)
 
 
 # set the runtime parameters
@@ -238,9 +240,9 @@ job_runtime_parameters = [
     )
     for key, value in {
         "LLM_DEPLOYMENT_ID": llm_deployment.id,
-        "APP_ID": app.id,
-        "TRACE_ID": dataset_trace.id,
-        "ACCESS_LOG_ID": dataset_access_log.id,
+        "DATAROBOT_APPLICATION_ID": app.id,
+        "DATASET_TRACE_ID": dataset_trace.id,
+        "DATASET_ACCESS_LOG_ID": dataset_access_log.id,
         "MODE": "append",
     }.items()
 ]
@@ -318,3 +320,4 @@ post_actions = CustomJobPostActions(
 
 pulumi.export("CUSTOM_JOB_RUN_ID", post_actions.custom_run_id)
 pulumi.export("CUSTOM_JOB_SCHEDULE_ID", post_actions.schedule_id)
+pulumi.export("MODE", "append")

@@ -1,6 +1,8 @@
 # nb/demo_api/config.py
+import json
 import logging
 import os
+import subprocess
 from datetime import datetime, timedelta, timezone
 
 import yaml
@@ -29,6 +31,32 @@ DATAROBOT_ENDPOINT = os.getenv("DATAROBOT_ENDPOINT", "https://app.datarobot.com/
 # Ensure you have DATAROBOT_API_TOKEN set in your environment or a .env file
 API_TOKEN = os.getenv("DATAROBOT_API_TOKEN", "YOUR_API_TOKEN_HERE")
 
+# Helper to load Pulumi outputs as a dict
+_DEF_PULUMI_OUTPUTS = None
+
+
+def _get_pulumi_outputs():
+    global _DEF_PULUMI_OUTPUTS
+    if _DEF_PULUMI_OUTPUTS is not None:
+        return _DEF_PULUMI_OUTPUTS
+    try:
+        raw = subprocess.check_output(["pulumi", "stack", "output", "-j"], text=True)
+        _DEF_PULUMI_OUTPUTS = json.loads(raw)
+    except Exception:
+        _DEF_PULUMI_OUTPUTS = {}
+    return _DEF_PULUMI_OUTPUTS
+
+
+def _get_with_pulumi_fallback(varname):
+    # Try env
+    val = os.getenv(varname)
+    if val:
+        return val
+    # Try Pulumi
+    pulumi_outputs = _get_pulumi_outputs()
+    return pulumi_outputs.get(varname)
+
+
 # Parse metadata.yaml to get required fieldNames dynamically
 metadata_path = os.path.join(current_dir, "../metadata.yaml")
 with open(metadata_path, "r") as f:
@@ -37,6 +65,14 @@ with open(metadata_path, "r") as f:
 field_names = [
     item["fieldName"] for item in metadata.get("runtimeParameterDefinitions", [])
 ]
+
+# --- Pulumi failover injection ---
+# For each field_name, if not set in env, but available in Pulumi, inject into os.environ
+for _var in field_names:
+    if _var not in os.environ or not os.environ[_var]:
+        _pulumi_val = _get_with_pulumi_fallback(_var)
+        if _pulumi_val:
+            os.environ[_var] = _pulumi_val
 
 # Dynamically create a Pydantic V2 Settings class
 fields = {name: (str, ...) for name in field_names}
