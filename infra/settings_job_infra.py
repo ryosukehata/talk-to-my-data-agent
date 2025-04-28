@@ -1,5 +1,7 @@
+import hashlib
 import textwrap
-from typing import Sequence
+from pathlib import Path
+from typing import Sequence, Tuple
 
 import pulumi_datarobot as datarobot
 from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
@@ -103,22 +105,50 @@ def get_job_files(
         datarobot.ApplicationSourceRuntimeParameterValueArgs
         | datarobot.CustomModelRuntimeParameterValueArgs,
     ],
-) -> list[tuple[str, str]]:
+) -> Tuple[list[tuple[str, str]], str]:
     _prep_metadata_yaml(runtime_parameter_values)
-    # Get all files from application path, excluding YAML, __pycache__, and Python cache files
-    source_files = [
-        (f.as_posix(), f.relative_to(job_path).as_posix())
-        for f in job_path.glob("**/*")
+    # Get all files from job path, excluding specific patterns
+    files_to_include: list[Path] = []
+    for f in job_path.glob("**/*"):
         if (
             f.is_file()
-            and ".yaml" not in f.name
+            and not f.name.endswith(".yaml")
             and "__pycache__" not in f.parts
             and not (f.name.endswith(".pyc") or f.name.endswith(".pyo"))
-        )
+            and f.name != ".DS_Store"
+            and f.name != "run_local.sh"
+        ):
+            files_to_include.append(f)
+
+    # Add the generated metadata.yaml
+    metadata_file_path = job_path / "metadata.yaml"
+    files_to_include.append(metadata_file_path)
+
+    # Calculate hash based on file contents
+    hasher = hashlib.sha256()
+    # Sort files by path to ensure consistent hash order
+    files_to_include.sort()
+    for file_path in files_to_include:
+        try:
+            with open(file_path, "rb") as file_content:
+                while True:
+                    chunk = file_content.read(4096)
+                    if not chunk:
+                        break
+                    hasher.update(chunk)
+        except FileNotFoundError:
+            # metadata.yaml might not exist on the very first run before _prep_metadata_yaml
+            # This is okay, the hash will change once it's created.
+            pass
+
+    content_hash = hasher.hexdigest()
+
+    # Prepare the list of tuples for Pulumi
+    source_files_tuples = [
+        (f.as_posix(), f.relative_to(job_path).as_posix()) for f in files_to_include
     ]
-    # Add the metadata.yaml file
-    source_files.append(((job_path / "metadata.yaml").as_posix(), "metadata.yaml"))
-    return source_files
+
+    return source_files_tuples, content_hash
 
 
 def create_job_schedule(

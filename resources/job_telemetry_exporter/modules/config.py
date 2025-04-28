@@ -132,11 +132,9 @@ POLL_INTERVAL_SECONDS = 10
 # Maximum time to wait for the export to complete (in seconds)
 MAX_WAIT_SECONDS = 600  # 10 minutes
 
-# --- Output Configuration ---
-# Directory to save the exported CSV file
-OUTPUT_DIR = "."
-# Default filename for the exported CSV
-DEFAULT_OUTPUT_FILENAME = "prediction_export.csv"
+# --- API URLs ---
+APP_ID = getattr(settings, "DATAROBOT_APPLICATION_ID")
+APP_LOG_URL = f"{DATAROBOT_ENDPOINT}/customApplications/{APP_ID}/usages/"
 
 # --- API Headers ---
 API_HEADERS = {
@@ -147,9 +145,4 @@ API_HEADERS = {
 JSON_API_HEADERS = {
     **API_HEADERS,
     "content-type": "application/json",
-}
-
-CSV_API_HEADERS = {
-    "accept": "*/*",
-    "Authorization": f"Bearer {API_TOKEN}",
 }

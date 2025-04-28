@@ -14,11 +14,18 @@ echo "CURRENT_CUSTOM_JOB_ID:     $CURRENT_CUSTOM_JOB_ID"
 echo "DATAROBOT_ENDPOINT:        $DATAROBOT_ENDPOINT"
 echo "DATAROBOT_API_TOKEN:       Use the environment variable \$DATAROBOT_API_TOKEN"
 echo "==================================================="
-# Run the code in job.py
-dir_path=$(dirname $0)
-echo "Entrypoint is at $dir_path - cd into it"
-cd $dir_path
 
+# Determine script directory and change into it first
+dir_path=$(dirname "$0")
+echo "Entrypoint is at $dir_path - cd into it"
+cd "$dir_path" || exit 1 # Exit if cd fails
+
+# install the required Python packages
+echo "===== Installing Python packages ======"
+pip install --no-cache-dir -r requirements.txt
+echo "===== Finished installing Python packages ======"
+
+# Verify python3 exists (already in correct directory)
 if command -v python3 &>/dev/null; then
     echo "python3 is installed and available."
 else
@@ -34,5 +41,3 @@ else
     echo "File $python_file does not exist"
     exit 1
 fi
-
-

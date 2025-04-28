@@ -29,11 +29,7 @@ sys.path.append("..")
 
 from settings_main import PROJECT_ROOT
 
-from infra import (
-    settings_app_infra,
-    settings_generative,
-    settings_job_infra,
-)
+from infra import settings_app_infra, settings_generative, settings_job_infra
 from infra.components.dr_credential import (
     get_credential_runtime_parameter_values,
     get_database_credentials,
@@ -45,10 +41,7 @@ from utils.custom_job_helper import (
     delete_all_custom_job_schedule,
     get_custom_job_by_name,
 )
-from utils.resources import (
-    app_env_name,
-    llm_deployment_env_name,
-)
+from utils.resources import app_env_name, llm_deployment_env_name
 from utils.schema import AppInfra
 
 TEXTGEN_DEPLOYMENT_ID = os.environ.get("TEXTGEN_DEPLOYMENT_ID")
@@ -148,9 +141,11 @@ llm_custom_model = datarobot.CustomModel(
     **settings_generative.custom_model_args.model_dump(exclude_none=True),
     use_case_ids=[use_case.id],
     source_llm_blueprint_id=llm_blueprint.id,
-    runtime_parameter_values=[]
-    if settings_generative.LLM == LLMs.DEPLOYED_LLM
-    else llm_runtime_parameter_values,
+    runtime_parameter_values=(
+        []
+        if settings_generative.LLM == LLMs.DEPLOYED_LLM
+        else llm_runtime_parameter_values
+    ),
     guard_configurations=settings_job_infra.guardrails,
 )
 
@@ -271,15 +266,24 @@ cleanup = CustomJobScheduleCleanup(
     "custom-job-schedule-cleanup", settings_job_infra.job_resource_name
 )
 
+job_files, job_files_hash = settings_job_infra.get_job_files(job_runtime_parameters)
+# Add content hash to description to force update on file change
+job_description = (
+    f"DataRobot Custom Job for telemetry export. Content Hash: {job_files_hash}"
+)
+
 custom_job = datarobot.CustomJob(
     resource_name=settings_job_infra.job_resource_name,
     name=settings_job_infra.job_resource_name,
+    description=job_description,
     environment_id=settings_job_infra.base_environment_id,
-    files=settings_job_infra.get_job_files(job_runtime_parameters),
+    files=job_files,
     runtime_parameter_values=job_runtime_parameters,
     resource_bundle_id=settings_job_infra.resource_bundle_id,
     job_type="default",
-    opts=pulumi.ResourceOptions(depends_on=[cleanup]),
+    opts=pulumi.ResourceOptions(
+        depends_on=[cleanup],
+    ),
 )
 
 pulumi.export(settings_job_infra.job_resource_name, custom_job.id)
