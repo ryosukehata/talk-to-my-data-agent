@@ -31,7 +31,7 @@ describe('MessageContainer Component', () => {
 
   test('renders children correctly', () => {
     render(
-      <MessageContainer id="test-message-1">
+      <MessageContainer>
         <div data-testid="test-child">Test Child Content</div>
       </MessageContainer>
     );
@@ -43,7 +43,7 @@ describe('MessageContainer Component', () => {
 
   test('applies correct styling', () => {
     render(
-      <MessageContainer id="test-message-2">
+      <MessageContainer>
         <div>Content</div>
       </MessageContainer>
     );
@@ -57,7 +57,7 @@ describe('MessageContainer Component', () => {
 
   test('calls scrollIntoView when mounted', () => {
     render(
-      <MessageContainer id="test-message-3">
+      <MessageContainer>
         <div>Scroll Test</div>
       </MessageContainer>
     );

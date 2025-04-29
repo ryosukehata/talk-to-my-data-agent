@@ -71,30 +71,19 @@ export async function postMessage({
   return data;
 }
 
-export const deleteAllMessages = async ({
-  chatId,
-}: {
-  chatId: string;
-}): Promise<void> => {
-  const { data } = await apiClient.delete<void>(`/v1/chats/${chatId}/messages`);
-  return data;
-};
-
 export interface IDeleteMessageParams {
-  index: number;
-  chatId?: string;
+  messageId: string;
   signal?: AbortSignal;
 }
 
 export const deleteMessage = async ({
-  index,
-  chatId,
+  messageId,
   signal,
 }: IDeleteMessageParams): Promise<IChatMessage[]> => {
-  if (!chatId) {
-    throw new Error("Chat ID is required for deleting messages");
+  if (!messageId) {
+    throw new Error("Message ID is required for deleting messages");
   }
-  const url = `/v1/chats/${chatId}/messages/${index}`;
+  const url = `/v1/chats/messages/${messageId}`;
   const { data } = await apiClient.delete<IChatMessage[]>(url, { signal });
   return data;
 };

@@ -9,7 +9,6 @@ interface MessageHeaderProps {
   name: string;
   date: string;
   onDelete?: () => void;
-  showDeleteButton?: boolean;
 }
 
 export const MessageHeader: React.FC<MessageHeaderProps> = ({ 
@@ -17,7 +16,6 @@ export const MessageHeader: React.FC<MessageHeaderProps> = ({
   name, 
   date,
   onDelete,
-  showDeleteButton = false
 }) => {
   return (
     <div className="self-stretch justify-between items-center gap-1 inline-flex">
@@ -26,7 +24,7 @@ export const MessageHeader: React.FC<MessageHeaderProps> = ({
         <div className="text-sm font-semibold leading-tight">{name}</div>
         <div className="text-xs font-normal leading-[17px]">{date}</div>
       </div>
-      {showDeleteButton && onDelete && (
+      {onDelete && (
         <Button
           variant="ghost"
           size="sm"

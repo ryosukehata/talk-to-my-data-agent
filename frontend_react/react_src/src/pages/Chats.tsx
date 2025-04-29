@@ -15,6 +15,7 @@ import { ROUTES } from "./routes";
 import { Loading } from "@/components/ui-custom/loading";
 import { RenameChatModal } from "@/components/RenameChatModal";
 import { DataSourceToggle } from "@/components/DataSourceToggle";
+import { IChatMessage } from "@/api-state/chat-messages/types";
 
 // Lazy load ResponseMessage for better performance
 const ResponseMessage = lazy(() =>
@@ -27,6 +28,53 @@ const ComponentLoading = () => (
   <div className="p-4 text-sm">Loading component...</div>
 );
 
+const ChatMessageItem = ({
+  message,
+  messages,
+  chatId,
+  index,
+}: {
+  message: IChatMessage;
+  messages: IChatMessage[];
+  chatId?: string;
+  index: number;
+}) => {
+  const responseId = messages[index + 1]?.id;
+
+  return (
+    <div className="table table-fixed w-full">
+      {message.role === "user" ? (
+        <>
+          <UserMessage
+            id={message.id}
+            responseId={responseId}
+            message={message.content}
+            timestamp={message.created_at}
+            chatId={chatId}
+          />
+          {message.in_progress && (
+            <Suspense fallback={<ComponentLoading />}>
+              <ResponseMessage
+                message={message}
+                isLoading={true}
+                chatId={chatId}
+              />
+            </Suspense>
+          )}
+        </>
+      ) : (
+        <Suspense fallback={<ComponentLoading />}>
+          <ResponseMessage
+            message={message}
+            isLoading={false}
+            chatId={chatId}
+          />
+        </Suspense>
+      )}
+    </div>
+  );
+};
+
 export const Chats: React.FC = () => {
   const { chatId } = useParams<{ chatId?: string }>();
   const navigate = useNavigate();
@@ -37,6 +85,7 @@ export const Chats: React.FC = () => {
   });
   const { data: chats } = useFetchAllChats();
   const { mutate: deleteChat } = useDeleteChat();
+  const allowSend = !messages?.some((message) => message.in_progress);
 
   // Find the active chat based on chatId param
   const activeChat = chats
@@ -84,41 +133,18 @@ export const Chats: React.FC = () => {
     return (
       <>
         <ScrollArea className="flex flex-1 flex-col overflow-y-hidden pr-2 pb-4">
-          {messages?.map((message, index) => (
-            <div key={index} className="flex flex-col">
-              {message.role === "user" ? (
-                <>
-                  <UserMessage
-                    id={index.toString()}
-                    message={message.content}
-                    timestamp={message.created_at}
-                  />
-                  {message.in_progress && (
-                    <Suspense fallback={<ComponentLoading />}>
-                      <ResponseMessage
-                        id={index.toString()}
-                        message={message}
-                        isLoading={true}
-                        chatId={chatId}
-                      />
-                    </Suspense>
-                  )}
-                </>
-              ) : (
-                <Suspense fallback={<ComponentLoading />}>
-                  <ResponseMessage
-                    id={index.toString()}
-                    message={message}
-                    isLoading={false}
-                    chatId={chatId}
-                  />
-                </Suspense>
-              )}
-            </div>
+          {messages?.map((message, index, array) => (
+            <ChatMessageItem
+              key={index}
+              message={message}
+              messages={array}
+              chatId={activeChat?.id}
+              index={index}
+            />
           ))}
         </ScrollArea>
         <Suspense fallback={<ComponentLoading />}>
-          <UserPrompt chatId={activeChat?.id} />
+          <UserPrompt chatId={activeChat?.id} allowSend={allowSend} />
         </Suspense>
       </>
     );

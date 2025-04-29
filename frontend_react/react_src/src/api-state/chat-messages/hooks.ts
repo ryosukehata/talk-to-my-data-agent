@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createChat,
-  deleteAllMessages,
   deleteChat,
   deleteMessage,
   getChatMessages,
@@ -159,39 +158,8 @@ export interface IDeleteMessagesResult {
   success: boolean;
 }
 
-export const useDeleteAllMessages = () => {
-  const queryClient = useQueryClient();
-  const mutation = useMutation<
-    void,
-    Error,
-    { chatId: string },
-    { previousMessages: IChatMessage[]; messagesKey: string[] }
-  >({
-    mutationFn: ({ chatId }) => deleteAllMessages({ chatId }),
-    onMutate: async ({ chatId }) => {
-      const messagesKey = messageKeys.messages(chatId);
-      await queryClient.cancelQueries({ queryKey: messagesKey });
-      const previousMessages =
-        queryClient.getQueryData<IChatMessage[]>(messagesKey) || [];
-      queryClient.setQueryData(messagesKey, []);
-      return { previousMessages, messagesKey };
-    },
-    onError: (_, __, context) => {
-      if (context?.previousMessages && context?.messagesKey) {
-        queryClient.setQueryData(context.messagesKey, context.previousMessages);
-      }
-    },
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: messageKeys.messages(variables?.chatId),
-      });
-    },
-  });
-  return mutation;
-};
-
 export interface IDeleteMessageParams {
-  index: number;
+  messageId: string;
   chatId?: string;
 }
 
@@ -203,16 +171,21 @@ export const useDeleteMessage = () => {
     IDeleteMessageParams,
     { previousMessages: IChatMessage[]; messagesKey: string[] }
   >({
-    mutationFn: ({ index, chatId }) => deleteMessage({ index, chatId }),
-    onMutate: async ({ index, chatId }) => {
+    mutationFn: ({ messageId }) => {
+      return deleteMessage({ messageId });
+    },
+    onMutate: async ({ messageId, chatId }) => {
+      if (!chatId) {
+        return { previousMessages: [], messagesKey: [] };
+      }
+
       const messagesKey = messageKeys.messages(chatId);
       await queryClient.cancelQueries({ queryKey: messagesKey });
 
       const previousMessages =
         queryClient.getQueryData<IChatMessage[]>(messagesKey) || [];
 
-      // Optimistically update the UI by removing the message at the index
-      // and its preceding/following pair
+      // Optimistically update the UI by removing the message
       queryClient.setQueryData<IChatMessage[]>(messagesKey, (oldData) => {
         if (!oldData) return [];
 
@@ -220,57 +193,27 @@ export const useDeleteMessage = () => {
         const newData = [...oldData];
 
         // Find the target message
-        const targetMessage = newData[index];
+        const targetMessage = newData.find((m) => m.id === messageId);
         if (!targetMessage) return newData;
 
-        // For assistant messages, also remove the preceding user message
-        if (targetMessage.role === "assistant" && index > 0) {
-          // Find the preceding user message
-          let precedingIndex = index - 1;
-          while (precedingIndex >= 0) {
-            if (newData[precedingIndex].role === "user") {
-              // Remove both messages (higher index first to avoid shifting issues)
-              newData.splice(Math.max(index, precedingIndex), 1);
-              newData.splice(Math.min(index, precedingIndex), 1);
-              break;
-            }
-            precedingIndex -= 1;
-          }
-        }
-        // For user messages, also remove the following assistant message
-        else if (targetMessage.role === "user") {
-          // Find the following assistant message
-          let followingIndex = index + 1;
-          while (followingIndex < newData.length) {
-            if (newData[followingIndex].role === "assistant") {
-              // Remove both messages (higher index first to avoid shifting issues)
-              newData.splice(Math.max(index, followingIndex), 1);
-              newData.splice(Math.min(index, followingIndex), 1);
-              break;
-            }
-            followingIndex += 1;
-          }
-
-          // If no following assistant message was found, just remove the user message
-          if (followingIndex >= newData.length) {
-            newData.splice(index, 1);
-          }
-        }
-
-        return newData;
+        return newData.filter((m) => m.id !== messageId);
       });
 
       return { previousMessages, messagesKey };
     },
-    onError: (_, __, context) => {
+    onError: (error, _, context) => {
+      console.error("Error deleting message:", error);
+
       if (context?.previousMessages && context?.messagesKey) {
         queryClient.setQueryData(context.messagesKey, context.previousMessages);
       }
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: messageKeys.messages(variables.chatId),
-      });
+      if (variables.chatId) {
+        queryClient.invalidateQueries({
+          queryKey: messageKeys.messages(variables.chatId),
+        });
+      }
     },
   });
 

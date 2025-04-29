@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { TruncatedText } from "@/components/ui-custom/truncated-text";
+
 import {
   Popover,
   PopoverContent,
@@ -77,11 +79,12 @@ export const MultiSelect = React.forwardRef<
     const [selectedValues, setSelectedValues] =
       React.useState<string[]>(defaultValue);
     const [isPopoverOpen, setIsPopoverOpen] = React.useState(false);
+    const [isComposing, setIsComposing] = React.useState(false);
 
     const handleInputKeyDown = (
       event: React.KeyboardEvent<HTMLInputElement>
     ) => {
-      if (event.key === "Enter") {
+      if (event.key === "Enter" && !isComposing) {
         setIsPopoverOpen(true);
       } else if (event.key === "Backspace" && !event.currentTarget.value) {
         toggleOption(selectedValues[selectedValues.length - 1]);
@@ -141,7 +144,7 @@ export const MultiSelect = React.forwardRef<
                         style={{ animationDuration: `${animation}s` }}
                         variant="secondary"
                       >
-                        {option?.label}
+                        <TruncatedText>{option?.label}</TruncatedText>
                         {option?.postfix && (
                           <span className="ml-1">{option?.postfix}</span>
                         )}
@@ -209,8 +212,10 @@ export const MultiSelect = React.forwardRef<
             <CommandInput
               placeholder="Search..."
               onKeyDown={handleInputKeyDown}
+              onCompositionStart={() => setIsComposing(true)}
+              onCompositionEnd={() => setIsComposing(false)}
             />
-            <CommandList>
+            <CommandList className="max-w-[800px]">
               <CommandEmpty>No results found.</CommandEmpty>
               <CommandGroup>
                 {options.map((option) => {

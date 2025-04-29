@@ -134,9 +134,11 @@ async def registry_download_callback() -> None:
                     dataframes = await download_registry_datasets(
                         selected_ids, st.session_state.analyst_db
                     )
-
+                dataset_names = [
+                    dataset.name for dataset in dataframes if not dataset.error
+                ]
                 async for message in process_data_and_update_state(
-                    dataframes,
+                    dataset_names,
                     st.session_state.analyst_db,
                     st.session_state.data_source,
                 ):

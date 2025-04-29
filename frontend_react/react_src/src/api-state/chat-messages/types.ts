@@ -66,6 +66,8 @@ export interface IChatMessage {
   )[];
   in_progress?: boolean;
   created_at?: string; // ISO timestamp for message creation time
+  chat_id?: string; // ID of the chat this message belongs to
+  id?: string; // Unique identifier for the message
 }
 
 export interface IUserMessage {

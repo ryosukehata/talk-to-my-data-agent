@@ -15,7 +15,7 @@ export const DataSourceSelector: React.FC<DataSourceSelectorProps> = ({
     <RadioGroup value={value} onValueChange={onChange}>
       <div className="flex items-center space-x-2">
         <RadioGroupItem value={DATA_SOURCES.FILE} id="r1" />
-        <Label htmlFor="r1">Local file or DataRobot AI Catalog</Label>
+        <Label htmlFor="r1">Local file or Data Registry</Label>
       </div>
       <div className="flex items-center space-x-2">
         <RadioGroupItem value={DATA_SOURCES.DATABASE} id="r2" />

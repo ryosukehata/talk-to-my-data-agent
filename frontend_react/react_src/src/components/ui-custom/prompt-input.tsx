@@ -24,6 +24,7 @@ const PromptInput = React.forwardRef<HTMLInputElement, InputProps>(
       className,
       type,
       icon,
+      onKeyDown,
       iconProps: { behavior: iconBehavior, ...iconProps },
       ...props
     },
@@ -32,6 +33,7 @@ const PromptInput = React.forwardRef<HTMLInputElement, InputProps>(
     const Icon = icon;
 
     const [isFocused, setIsFocused] = React.useState(false);
+    const [isComposing, setIsComposing] = React.useState(false);
     return (
       <div
         className={cn(
@@ -52,6 +54,13 @@ const PromptInput = React.forwardRef<HTMLInputElement, InputProps>(
             "flex items-center justify-center w-full bg-transparent placeholder:text-muted-foreground file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
             className
           )}
+          onCompositionStart={() => setIsComposing(true)}
+          onCompositionEnd={() => setIsComposing(false)}
+          onKeyDown={(event) => {
+            if (onKeyDown && !isComposing) {
+              onKeyDown(event);
+            }
+          }}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           ref={ref}

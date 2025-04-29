@@ -5,7 +5,7 @@ import { faPaperPlane } from "@fortawesome/free-solid-svg-icons/faPaperPlane";
 import { usePostMessage, useFetchAllChats } from "@/api-state/chat-messages/hooks";
 import { useAppState } from "@/state";
 
-export const UserPrompt = ({ chatId }: { chatId?: string }) => {
+export const UserPrompt = ({ chatId, allowSend }: { chatId?: string, allowSend?: boolean }) => {
   const { mutate } = usePostMessage();
   const { enableChartGeneration, enableBusinessInsights, dataSource: globalDataSource } = useAppState();
   const { data: chats } = useFetchAllChats();
@@ -38,7 +38,7 @@ export const UserPrompt = ({ chatId }: { chatId?: string }) => {
       }}
       placeholder="Ask another question about your datasets."
       onKeyDown={(e) => {
-        if (e.key === "Enter") {
+        if (e.key === "Enter" && allowSend) {
           sendMessage();
         }
       }}

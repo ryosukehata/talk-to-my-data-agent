@@ -17,10 +17,8 @@ import { CodeTabContent } from "./CodeTabContent";
 import { ErrorPanel } from "./ErrorPanel";
 import { RESPONSE_TABS } from "./constants";
 import { formatMessageDate } from "./utils";
-import { useDeleteMessage } from "@/api-state/chat-messages/hooks";
 
 interface ResponseMessageProps {
-  id: string;
   chatId?: string;
   date?: string;
   message?: IChatMessage;
@@ -71,13 +69,11 @@ const isAnalysisComponent = (
 };
 
 export const ResponseMessage: React.FC<ResponseMessageProps> = ({
-  id,
   date,
   message,
   chatId,
   isLoading = false,
 }) => {
-  const { mutate: deleteMessage } = useDeleteMessage();
   const [activeTab, setActiveTab] = useState(RESPONSE_TABS.SUMMARY);
 
   const {
@@ -172,20 +168,12 @@ export const ResponseMessage: React.FC<ResponseMessageProps> = ({
     };
   }, [message, date]);
 
-  const handleDelete = () => {
-    if (id) {
-      deleteMessage({ index: parseInt(id), chatId });
-    }
-  };
-
   return (
-    <MessageContainer id={id}>
+    <MessageContainer>
       <MessageHeader
         avatar={DataRobotAvatar}
         name="DataRobot"
         date={displayDate}
-        onDelete={handleDelete}
-        showDeleteButton={!isLoading}
       />
 
       {isLoading ? (

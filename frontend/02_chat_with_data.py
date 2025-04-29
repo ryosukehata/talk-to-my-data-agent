@@ -291,6 +291,7 @@ async def run_complete_analysis_st(
                 datasets_names=selected_datasets,
                 analyst_db=st.session_state.analyst_db,
                 chat_id=st.session_state.current_chat_id,
+                message_id=st.session_state.chat_messages[-1].id,
                 enable_chart_generation=st.session_state.enable_chart_generation,
                 enable_business_insights=st.session_state.enable_business_insights,
             )
@@ -510,6 +511,9 @@ async def main() -> None:
                         ):
                             with status_container:
                                 await analyst_db.delete_chat(chat_id=chat_id)
+                                if chat_id == st.session_state.current_chat_id:
+                                    st.session_state.current_chat_id = None
+                                    st.session_state.chat_messages = []
                                 st.rerun()
 
         # Current chat info at the bottom
@@ -556,10 +560,8 @@ async def main() -> None:
                     chat_name=st.session_state.current_chat_name
                 )
 
-            await analyst_db.update_chat(
-                chat_id=st.session_state.current_chat_id,
-                chat_message=user_message,
-                mode="append",
+            await analyst_db.add_chat_message(
+                chat_id=st.session_state.current_chat_id, message=user_message
             )
             st.session_state.chat_messages.append(user_message)
 

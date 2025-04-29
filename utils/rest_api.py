@@ -55,6 +55,7 @@ from utils.api import (
     AnalysisGenerationError,
     download_registry_datasets,
     list_registry_datasets,
+    log_memory,
     process_data_and_update_state,
     run_complete_analysis,
 )
@@ -257,18 +258,23 @@ async def add_session_middleware(request: Request, call_next):  # type: ignore[n
 
         request.state.session.datarobot_account_info = account_info
         dr_uid = request.state.session.datarobot_account_info.get("uid")
+        if session_id is None and dr_uid is not None:
+            session_id = base64.b64encode(dr_uid.encode()).decode()
+            user_id = dr_uid
 
         # Initialize database in the session
-        await _initialize_database(request, dr_uid or user_id)
+        if user_id:
+            await _initialize_database(request, user_id)
 
     # Process the request
     response: Response = await call_next(request)
 
     if request.method in request_methods:
         # Set session cookie if needed
-        _set_session_cookie(
-            response, user_id, session_id, request.cookies.get("session_fastapi")
-        )
+        if session_id:
+            _set_session_cookie(
+                response, user_id, session_id, request.cookies.get("session_fastapi")
+            )
 
     return response
 
@@ -277,13 +283,13 @@ async def _initialize_session(
     request: Request,
 ) -> tuple[
     SessionState,
-    str,
-    str,
+    str | None,
+    str | None,
 ]:
     """Initialize the session state and return the session ID and user ID."""
     # Create a new session state with default values
     session_state = SessionState()
-    empty_session_state = {
+    empty_session_state: dict[str, Any] = {
         "datarobot_account_info": None,
         "datarobot_endpoint": os.environ.get("DATAROBOT_ENDPOINT"),
         "datarobot_api_token": None,
@@ -302,26 +308,28 @@ async def _initialize_session(
             pass  # If decoding fails, continue without user_id
 
     # Generate a new user ID if needed
+    new_user_id = None
     email_header = request.headers.get("x-user-email")
     if email_header:
         new_user_id = str(uuid.uuid5(uuid.NAMESPACE_OID, email_header))[:36]
-    else:
-        new_user_id = str(uuid.uuid4())[:36]
 
     # Determine session ID
+    session_id = None
     if session_fastapi_cookie:
         session_id = session_fastapi_cookie
-    else:
+    elif new_user_id:
         session_id = base64.b64encode(new_user_id.encode()).decode()
 
     # Get or create session in store
-    async with session_lock:
-        existing_session = session_store.get(session_id)
-        if existing_session:
-            return existing_session, session_id, user_id or new_user_id
-        else:
-            session_store[session_id] = session_state
-            return session_state, session_id, user_id or new_user_id
+    if session_id:
+        async with session_lock:
+            existing_session = session_store.get(session_id)
+            if existing_session:
+                return existing_session, session_id, user_id or new_user_id
+            else:
+                session_store[session_id] = session_state
+
+    return session_state, session_id, user_id or new_user_id
 
 
 async def _initialize_database(request: Request, user_id: str) -> None:
@@ -391,7 +399,14 @@ async def upload_files(
                 file_extension = os.path.splitext(file.filename)[1].lower()
 
                 if file_extension == ".csv":
-                    df = pl.read_csv(io.StringIO(contents.decode("utf-8")))
+                    logger.info(f"Loading CSV: {file.filename}")
+                    log_memory()
+                    df = pl.read_csv(
+                        io.StringIO(contents.decode("utf-8")),
+                        infer_schema_length=10000,
+                        low_memory=True,
+                    )
+                    log_memory()
                     dataset_name = os.path.splitext(file.filename)[0]
                     dataset = AnalystDataset(name=dataset_name, data=df)
 
@@ -472,9 +487,21 @@ async def upload_files(
         if id_list:
             with use_user_token(request):
                 dataframes = await download_registry_datasets(id_list, analyst_db)
+                dataset_names = [
+                    dataset.name for dataset in dataframes if not dataset.error
+                ]
                 background_tasks.add_task(
-                    process_and_update, dataframes, analyst_db, DataSourceType.REGISTRY
+                    process_and_update,
+                    dataset_names,
+                    analyst_db,
+                    DataSourceType.REGISTRY,
                 )
+                for dts in dataframes:
+                    dts_response: FileUploadResponse = {
+                        "dataset_name": dts.name,
+                        "error": dts.error,
+                    }
+                    response.append(dts_response)
 
     return response
 
@@ -782,74 +809,34 @@ async def get_chat_messages(
     return chat
 
 
-@router.delete("/chats/{chat_id}/messages")
-async def delete_chat_messages(
-    chat_id: str,
-    analyst_db: AnalystDB = Depends(get_initialized_db),
-) -> list[AnalystChatMessage]:
-    """Delete all messages for a specific chat"""
-
-    await analyst_db.chat_handler.update_chat(messages=[], chat_id=chat_id)
-
-    return cast(list[AnalystChatMessage], [])
-
-
-@router.delete("/chats/{chat_id}/messages/{index}")
+@router.delete("/chats/messages/{message_id}")
 async def delete_chat_message(
     request: Request,
-    chat_id: str,
-    index: int,
+    message_id: str,
     analyst_db: AnalystDB = Depends(get_initialized_db),
 ) -> list[AnalystChatMessage]:
-    """Delete a specific message and its preceding/following pair (user/assistant) from a chat"""
-    if not hasattr(request.state.session, "chats"):
-        request.state.session.chats = {}
+    """Delete a specific message"""
+    try:
+        message = await analyst_db.get_chat_message(message_id=message_id)
+        if not message:
+            raise HTTPException(
+                status_code=404, detail=f"Message with ID {message_id} not found"
+            )
+        else:
+            await analyst_db.delete_chat_message(message_id=message_id)
+            messages = await analyst_db.get_chat_messages(
+                chat_id=message.chat_id,
+            )
+            return cast(list[AnalystChatMessage], list(messages))
+    except Exception as e:
+        logger.error(f"Error deleting message: {str(e)}")
 
-    messages = (await analyst_db.get_chat_messages(chat_id=chat_id)) or []
-
-    # Make sure the index is valid
-    if index < 0 or index >= len(messages):
-        raise HTTPException(status_code=400, detail=f"Invalid message index: {index}")
-
-    # Determine which messages to delete
-    target_message = messages[index]
-
-    # For assistant messages, also delete the preceding user message
-    if target_message.role == "assistant" and index > 0:
-        # Find the preceding user message
-        preceding_index = index - 1
-        while preceding_index >= 0:
-            if messages[preceding_index].role == "user":
-                # Delete both messages
-                del messages[max(index, preceding_index)]  # Delete higher index first
-                del messages[min(index, preceding_index)]
-                break
-            preceding_index -= 1
-    # For user messages, also delete the following assistant message
-    elif target_message.role == "user":
-        # Find the following assistant message
-        following_index = index + 1
-        while following_index < len(messages):
-            if messages[following_index].role == "assistant":
-                # Delete both messages
-                del messages[max(index, following_index)]  # Delete higher index first
-                del messages[min(index, following_index)]
-                break
-            following_index += 1
-        # If no following assistant message was found, just delete the user message
-        if following_index >= len(messages):
-            del messages[index]
-
-    await analyst_db.chat_handler.update_chat(
-        messages=messages,
-        chat_id=chat_id,
-    )
-
-    return cast(list[AnalystChatMessage], list(messages))
+        return cast(list[AnalystChatMessage], [])
 
 
 @router.post("/chats/messages")
 async def create_new_chat_message(
+    request: Request,
     payload: ChatMessagePayload,
     background_tasks: BackgroundTasks,
     analyst_db: AnalystDB = Depends(get_initialized_db),
@@ -866,10 +853,9 @@ async def create_new_chat_message(
         role="user", content=payload.message, components=[]
     )
 
-    await analyst_db.update_chat(
+    message_id = await analyst_db.add_chat_message(
         chat_id=chat_id,
-        chat_message=user_message,
-        mode="append",
+        message=user_message,
     )
 
     # Create valid messages for the chat request
@@ -892,8 +878,10 @@ async def create_new_chat_message(
         payload.data_source,
         analyst_db,
         chat_id,
+        message_id,
         payload.enable_chart_generation,
         payload.enable_business_insights,
+        request,
     )
 
     chat_list = await analyst_db.get_chat_list()
@@ -911,47 +899,55 @@ async def create_new_chat_message(
 
 @router.post("/chats/{chat_id}/messages")
 async def create_chat_message(
+    request: Request,
     chat_id: str,
     payload: ChatMessagePayload,
     background_tasks: BackgroundTasks,
     analyst_db: AnalystDB = Depends(get_initialized_db),
 ) -> dict[str, Union[str, list[AnalystChatMessage], None]]:
     """Post a message to a specific chat"""
+    messages = await analyst_db.get_chat_messages(chat_id=chat_id)
 
-    # Create the user message
-    user_message = AnalystChatMessage(
-        role="user", content=payload.message, components=[]
-    )
+    # Check if any message is in progress
+    in_progress = any(message.in_progress for message in messages)
 
-    await analyst_db.update_chat(
-        chat_id=chat_id,
-        chat_message=user_message,
-        mode="append",
-    )
+    # Check if cancelled
+    if not in_progress:
+        # Create the user message
+        user_message = AnalystChatMessage(
+            role="user", content=payload.message, components=[]
+        )
 
-    # Create valid messages for the chat request
-    valid_messages: list[ChatCompletionMessageParam] = [
-        user_message.to_openai_message_param()
-    ]
+        message_id = await analyst_db.add_chat_message(
+            chat_id=chat_id,
+            message=user_message,
+        )
 
-    # Add the current message
-    valid_messages.append(
-        ChatCompletionUserMessageParam(role="user", content=payload.message)
-    )
+        # Create valid messages for the chat request
+        valid_messages: list[ChatCompletionMessageParam] = [
+            user_message.to_openai_message_param()
+        ]
 
-    # Create the chat request
-    chat_request = ChatRequest(messages=valid_messages)
+        # Add the current message
+        valid_messages.append(
+            ChatCompletionUserMessageParam(role="user", content=payload.message)
+        )
 
-    # Run the analysis in the background
-    background_tasks.add_task(
-        run_complete_analysis_task,
-        chat_request,
-        payload.data_source,
-        analyst_db,
-        chat_id,
-        payload.enable_chart_generation,
-        payload.enable_business_insights,
-    )
+        # Create the chat request
+        chat_request = ChatRequest(messages=valid_messages)
+
+        # Run the analysis in the background
+        background_tasks.add_task(
+            run_complete_analysis_task,
+            chat_request,
+            payload.data_source,
+            analyst_db,
+            chat_id,
+            message_id,
+            payload.enable_chart_generation,
+            payload.enable_business_insights,
+            request,
+        )
 
     chat_list = await analyst_db.get_chat_list()
     chat_name = next((n["name"] for n in chat_list if n["id"] == chat_id), None)
@@ -971,8 +967,10 @@ async def run_complete_analysis_task(
     data_source: str,
     analyst_db: AnalystDB,
     chat_id: str,
+    message_id: str,
     enable_chart_generation: bool,
     enable_business_insights: bool,
+    request: Request,
 ) -> None:
     """Run the complete analysis pipeline"""
     source = DataSourceType(data_source)
@@ -983,12 +981,14 @@ async def run_complete_analysis_task(
         datasets_names = (
             await analyst_db.list_analyst_datasets(DataSourceType.REGISTRY)
         ) + (await analyst_db.list_analyst_datasets(DataSourceType.FILE))
+
     run_analysis_iterator = run_complete_analysis(
         chat_request=chat_request,
         data_source=source,
         datasets_names=datasets_names,
         analyst_db=analyst_db,
         chat_id=chat_id,
+        message_id=message_id,
         enable_chart_generation=enable_chart_generation,
         enable_business_insights=enable_business_insights,
     )

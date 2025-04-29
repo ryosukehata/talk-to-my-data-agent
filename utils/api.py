@@ -86,6 +86,7 @@ from utils.schema import (
     DataDictionaryColumn,
     DataRegistryDataset,
     DictionaryGeneration,
+    DownloadedRegistryDataset,
     EnhancedQuestionGeneration,
     GetBusinessAnalysisMetadata,
     GetBusinessAnalysisRequest,
@@ -234,7 +235,7 @@ def list_registry_datasets(limit: int = 100) -> list[DataRegistryDataset]:
 
 async def download_registry_datasets(
     dataset_ids: list[str], analyst_db: AnalystDB
-) -> list[str]:
+) -> list[DownloadedRegistryDataset]:
     """Load selected datasets as pandas DataFrames
 
     Args:
@@ -243,6 +244,7 @@ async def download_registry_datasets(
     Returns:
         list[AnalystDataset]: Dictionary of dataset names and data
     """
+    downloaded_datasets = []
     datasets = [dr.Dataset.get(id_) for id_ in dataset_ids]
     if (
         sum([ds.size for ds in datasets if ds.size is not None])
@@ -263,14 +265,16 @@ async def download_registry_datasets(
             logger.info(f"Successfully downloaded {dataset.name}")
         except Exception as e:
             logger.error(f"Failed to read dataset {dataset.name}: {str(e)}")
+            downloaded_datasets.append(
+                DownloadedRegistryDataset(name=dataset.name, error=str(e))
+            )
             continue
-    names = []
     for result_dataset in result_datasets:
         await analyst_db.register_dataset(
             result_dataset, DataSourceType.REGISTRY, dataset.size or 0
         )
-        names.append(result_dataset.name)
-    return names
+        downloaded_datasets.append(DownloadedRegistryDataset(name=result_dataset.name))
+    return downloaded_datasets
 
 
 async def _get_dictionary_batch(
@@ -1336,6 +1340,7 @@ async def run_complete_analysis(
     datasets_names: list[str],
     analyst_db: AnalystDB,
     chat_id: str,
+    message_id: str,
     enable_chart_generation: bool = True,
     enable_business_insights: bool = True,
 ) -> AsyncGenerator[Component | AnalysisGenerationError, None]:
@@ -1353,20 +1358,17 @@ async def run_complete_analysis(
         content=enhanced_message,
         components=[EnhancedQuestionGeneration(enhanced_user_message=enhanced_message)],
     )
-    messages = await analyst_db.get_chat_messages(chat_id=chat_id)
-    if messages:
-        user_message = messages[-1]
-        user_message.in_progress = False
-    await analyst_db.update_chat(
-        chat_message=user_message,
-        chat_id=chat_id,
-        mode="overwrite",
-    )
-    await analyst_db.update_chat(
-        chat_message=assistant_message,
-        chat_id=chat_id,
-        mode="append",
-    )
+    user_message = await analyst_db.get_chat_message(message_id=message_id)
+    if user_message:
+        if user_message.role == "user":
+            user_message.in_progress = False
+            await analyst_db.update_chat_message(
+                message_id=message_id,
+                message=user_message,
+            )
+            await analyst_db.add_chat_message(
+                chat_id=chat_id, message=assistant_message
+            )
     # Run main analysis
     logger.info("Start main analysis")
     try:
@@ -1402,20 +1404,16 @@ async def run_complete_analysis(
             yield AnalysisGenerationError(error_message)
 
             assistant_message.in_progress = False
-            await analyst_db.update_chat(
-                chat_message=assistant_message,
-                chat_id=chat_id,
-                mode="overwrite",
+            await analyst_db.update_chat_message(
+                message_id=assistant_message.id, message=assistant_message
             )
             return
 
         yield analysis_result
 
         assistant_message.components.append(analysis_result)
-        await analyst_db.update_chat(
-            chat_message=assistant_message,
-            chat_id=chat_id,
-            mode="overwrite",
+        await analyst_db.update_chat_message(
+            message_id=assistant_message.id, message=assistant_message
         )
 
     except Exception as e:
@@ -1424,10 +1422,8 @@ async def run_complete_analysis(
         yield AnalysisGenerationError(error_message)
 
         assistant_message.in_progress = False
-        await analyst_db.update_chat(
-            chat_message=assistant_message,
-            chat_id=chat_id,
-            mode="overwrite",
+        await analyst_db.update_chat_message(
+            message_id=assistant_message.id, message=assistant_message
         )
         return
 
@@ -1438,10 +1434,8 @@ async def run_complete_analysis(
         and (enable_chart_generation or enable_business_insights)
     ):
         assistant_message.in_progress = False
-        await analyst_db.update_chat(
-            chat_message=assistant_message,
-            chat_id=chat_id,
-            mode="overwrite",
+        await analyst_db.update_chat_message(
+            message_id=assistant_message.id, message=assistant_message
         )
         return
 
@@ -1460,19 +1454,15 @@ async def run_complete_analysis(
 
             yield AnalysisGenerationError(error_message)
 
-            await analyst_db.update_chat(
-                chat_message=assistant_message,
-                chat_id=chat_id,
-                mode="overwrite",
+            await analyst_db.update_chat_message(
+                message_id=assistant_message.id, message=assistant_message
             )
 
         elif charts_result is not None:
             yield charts_result
             assistant_message.components.append(charts_result)
-            await analyst_db.update_chat(
-                chat_message=assistant_message,
-                chat_id=chat_id,
-                mode="overwrite",
+            await analyst_db.update_chat_message(
+                message_id=assistant_message.id, message=assistant_message
             )
 
         # Handle business analysis results
@@ -1481,20 +1471,16 @@ async def run_complete_analysis(
 
             yield AnalysisGenerationError("Error generating business insights")
 
-            await analyst_db.update_chat(
-                chat_message=assistant_message,
-                chat_id=chat_id,
-                mode="overwrite",
+            await analyst_db.update_chat_message(
+                message_id=assistant_message.id, message=assistant_message
             )
         elif business_result is not None:
             yield business_result
             assistant_message.components.append(business_result)
             assistant_message.in_progress = False
 
-            await analyst_db.update_chat(
-                chat_message=assistant_message,
-                chat_id=chat_id,
-                mode="overwrite",
+            await analyst_db.update_chat_message(
+                message_id=assistant_message.id, message=assistant_message
             )
 
     except Exception as e:
@@ -1503,10 +1489,8 @@ async def run_complete_analysis(
         yield AnalysisGenerationError(error_message)
 
         assistant_message.in_progress = False
-        await analyst_db.update_chat(
-            chat_message=assistant_message,
-            chat_id=chat_id,
-            mode="overwrite",
+        await analyst_db.update_chat_message(
+            message_id=assistant_message.id, message=assistant_message
         )
 
 

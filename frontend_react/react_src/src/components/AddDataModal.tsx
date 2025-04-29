@@ -20,10 +20,13 @@ import {
   useGetDatabaseTables,
   useLoadFromDatabaseMutation,
 } from "@/api-state/database/hooks";
-import { useFileUploadMutation } from "@/api-state/datasets/hooks";
+import { useFileUploadMutation, UploadError } from "@/api-state/datasets/hooks";
 import { Separator } from "@radix-ui/react-separator";
 import loader from "@/assets/loader.svg";
 import { useAppState } from "@/state/hooks";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AxiosError } from "axios";
+import { TruncatedText } from "./ui-custom/truncated-text";
 
 export const AddDataModal = () => {
   const { data } = useFetchAllDatasets();
@@ -34,14 +37,18 @@ export const AddDataModal = () => {
   const [files, setFiles] = useState<File[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, setIsPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const { mutate, progress } = useFileUploadMutation({
     onSuccess: () => {
       setIsPending(false);
+      setError(null);
       setIsOpen(false);
     },
-    onError: (error: Error) => {
+    onError: (error: UploadError | AxiosError) => {
       setIsPending(false);
       console.error(error);
+      setError(error.message || "An error occurred while uploading files");
     },
   });
 
@@ -57,7 +64,15 @@ export const AddDataModal = () => {
   });
 
   return (
-    <Dialog defaultOpen={isOpen} onOpenChange={setIsOpen} open={isOpen}>
+    <Dialog
+      defaultOpen={isOpen}
+      onOpenChange={(open) => {
+        setIsOpen(open);
+        setError(null);
+        setFiles([]);
+      }}
+      open={isOpen}
+    >
       <DialogTrigger asChild>
         <Button variant="outline">
           <FontAwesomeIcon icon={faPlus} /> Add Data
@@ -69,10 +84,7 @@ export const AddDataModal = () => {
           <Separator className="border-t" />
           <DialogDescription></DialogDescription>
         </DialogHeader>
-        <DataSourceSelector
-          value={dataSource}
-          onChange={setDataSource}
-        />
+        <DataSourceSelector value={dataSource} onChange={setDataSource} />
         <Separator className="my-4 border-t" />
         {dataSource == DATA_SOURCES.FILE && (
           <>
@@ -85,7 +97,7 @@ export const AddDataModal = () => {
               </div>
             </div>
             <FileUploader onFilesChange={setFiles} progress={progress} />
-            <h4>DataRobot AI Catalog</h4>
+            <h4>Data Registry</h4>
             <h6>Select one or more catalog items</h6>
             <MultiSelect
               options={
@@ -101,9 +113,17 @@ export const AddDataModal = () => {
               defaultValue={selectedDatasets}
               placeholder="Select one or more items."
               variant="inverted"
+              modalPopover
               animation={2}
               maxCount={3}
             />
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>
+                  <TruncatedText maxLength={100}>{error}</TruncatedText>
+                </AlertDescription>
+              </Alert>
+            )}
           </>
         )}
 
@@ -124,6 +144,7 @@ export const AddDataModal = () => {
               defaultValue={selectedTables}
               placeholder="Select one or more items."
               variant="inverted"
+              modalPopover
               animation={2}
               maxCount={3}
             />
@@ -131,12 +152,15 @@ export const AddDataModal = () => {
         )}
         <Separator className="border-t mt-6" />
         <DialogFooter>
-          <Button variant={"ghost"}>Cancel</Button>
+          <Button variant={"ghost"} onClick={() => setIsOpen(false)}>
+            Cancel
+          </Button>
           <Button
             type="submit"
             variant="secondary"
             disabled={isPending}
             onClick={() => {
+              setError(null);
               setIsPending(true);
               if (dataSource === DATA_SOURCES.DATABASE) {
                 if (selectedTables.length > 0) {

@@ -42,7 +42,7 @@ export const DataSourceToggle: React.FC = () => {
         <div className="m-2">Database</div>
       </ToggleGroupItem>
       <ToggleGroupItem value={DATA_SOURCES.FILE} className="text-sm">
-        <div className="m-2">Catalog / File</div>
+        <div className="m-2">Registry / File</div>
       </ToggleGroupItem>
     </ToggleGroup>
   );

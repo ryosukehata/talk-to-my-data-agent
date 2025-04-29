@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, AsyncGenerator, List, Literal, Optional, cast
+from typing import Any, AsyncGenerator, List, Optional, cast
 
 import duckdb
 import polars as pl
@@ -39,7 +39,7 @@ logger = get_logger("ApplicationDB")
 
 # increment this number if the database schema has changed to prevent conflicts with existing deployments
 # this will force reinitialisation - all tables will be dropped
-ANALYST_DATABASE_VERSION = 4
+ANALYST_DATABASE_VERSION = 5
 
 
 class DatasetType(Enum):
@@ -621,10 +621,21 @@ class ChatHandler(BaseDuckDBHandler):
                     id VARCHAR PRIMARY KEY,
                     user_id VARCHAR NOT NULL,
                     chat_name VARCHAR NOT NULL,
-                    chat_messages JSON,
                     data_source VARCHAR DEFAULT 'catalog',
                     created_at TIMESTAMP,
-                    updated_at TIMESTAMP,
+                    updated_at TIMESTAMP
+                )
+                """,
+            )
+
+            await self.execute_query(
+                conn,
+                """
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id VARCHAR PRIMARY KEY,
+                    chat_id VARCHAR NOT NULL,
+                    message JSON NOT NULL,
+                    created_at TIMESTAMP,
                 )
                 """,
             )
@@ -654,15 +665,14 @@ class ChatHandler(BaseDuckDBHandler):
                 conn,
                 """
                 INSERT INTO chat_history
-                    (id, user_id, chat_name, chat_messages, data_source, created_at, updated_at)
+                    (id, user_id, chat_name, data_source, created_at, updated_at)
                 VALUES
-                    (?, ?, ?, ?, ?, ?, ?)
+                    (?, ?, ?, ?, ?, ?)
                 """,
                 [
                     chat_id,
                     self.user_id,
                     chat_name,
-                    json.dumps([]),  # Empty messages array
                     data_source,
                     current_time,
                     current_time,
@@ -695,40 +705,51 @@ class ChatHandler(BaseDuckDBHandler):
             return []
 
         async with self._get_connection() as conn:
-            if chat_id:
-                # Get by ID (more efficient and allows cross-user access if needed)
-                result = await self.execute_query(
+            # First, get the chat ID if only name was provided
+            if not chat_id:
+                id_result = await self.execute_query(
                     conn,
                     """
-                    SELECT chat_messages, created_at, updated_at
-                    FROM chat_history
-                    WHERE id = ?
-                    """,
-                    [chat_id],
-                )
-            else:
-                # Get by name and user ID
-                result = await self.execute_query(
-                    conn,
-                    """
-                    SELECT chat_messages, created_at, updated_at
+                    SELECT id
                     FROM chat_history
                     WHERE user_id = ? AND chat_name = ?
                     """,
                     [self.user_id, chat_name],
                 )
+                id_row = await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: id_result.fetchone()
+                )
 
-            row = await asyncio.get_running_loop().run_in_executor(
-                None, lambda: result.fetchone()
+                if not id_row:
+                    return []
+
+                chat_id = id_row[0]
+
+            # Now retrieve messages for this chat ID
+            result = await self.execute_query(
+                conn,
+                """
+                SELECT id, message, chat_id, created_at
+                FROM chat_messages
+                WHERE chat_id = ?
+                ORDER BY created_at
+                """,
+                [chat_id],
             )
 
-            if row:
-                messages_json = json.loads(row[0])
-                # Assuming messages_json is a list of dictionaries
-                return [
-                    AnalystChatMessage.model_validate(message)  # Don't unpack with **
-                    for message in messages_json
-                ]
+            rows = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: result.fetchall()
+            )
+
+            if rows:
+                messages = []
+                for row in rows:
+                    message = AnalystChatMessage.model_validate(json.loads(row[1]))
+                    # Ensure the message has the correct id and chat_id
+                    message.id = row[0]
+                    message.chat_id = row[2]
+                    messages.append(message)
+                return messages
             return []
 
     async def get_chat_names(self) -> list[str]:
@@ -856,6 +877,246 @@ class ChatHandler(BaseDuckDBHandler):
                 [data_source, datetime.now(timezone.utc), chat_id],
             )
 
+    async def add_chat_message(
+        self,
+        chat_id: str,
+        message: AnalystChatMessage,
+    ) -> str:
+        """
+        Add a new message to a chat.
+
+        Args:
+            chat_id: The ID of the chat to update
+            message: The message to add
+
+        Returns:
+            The ID of the newly added message
+        """
+        if not chat_id:
+            logger.warning("No chat_id provided for add_chat_message operation")
+            return ""
+
+        logger.info(f"Adding message to chat with ID {chat_id}")
+
+        # Ensure message has the chat_id and a unique ID
+        if not message.id:
+            message.id = str(uuid.uuid4())
+        message.chat_id = chat_id
+
+        # Check if this chat exists
+        async with self._get_connection() as conn:
+            result = await self.execute_query(
+                conn, "SELECT 1 FROM chat_history WHERE id = ?", [chat_id]
+            )
+            exists = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: result.fetchone() is not None
+            )
+
+            if not exists:
+                logger.warning(f"Chat with ID {chat_id} does not exist")
+                return ""
+
+            # Insert the new message
+            message_json = json.dumps(message.model_dump(), cls=ChatJSONEncoder)
+            await self.execute_query(
+                conn,
+                """
+                INSERT INTO chat_messages
+                    (id, chat_id, message, created_at)
+                VALUES
+                    (?, ?, ?, ?)
+                """,
+                [
+                    message.id,
+                    chat_id,
+                    message_json,
+                    message.created_at,
+                ],
+            )
+
+            # Update the chat's updated_at timestamp
+            await self.execute_query(
+                conn,
+                """
+                UPDATE chat_history SET
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                [datetime.now(timezone.utc), chat_id],
+            )
+
+            return message.id
+
+    async def delete_chat_message(
+        self,
+        message_id: str,
+    ) -> bool:
+        """
+        Delete a specific chat message by its ID.
+
+        Args:
+            message_id: ID of the message to delete
+
+        Returns:
+            True if deletion was successful, False otherwise
+        """
+        if not message_id:
+            logger.warning("No message_id provided for delete_chat_message operation")
+            return False
+
+        logger.info(f"Deleting chat message with ID {message_id}")
+
+        async with self._get_connection() as conn:
+            # Check if the message exists
+            result = await self.execute_query(
+                conn, "SELECT chat_id FROM chat_messages WHERE id = ?", [message_id]
+            )
+            row = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: result.fetchone()
+            )
+
+            if not row:
+                logger.warning(f"Chat message with ID {message_id} not found")
+                return False
+
+            chat_id = row[0]
+
+            # Delete the message
+            await self.execute_query(
+                conn,
+                "DELETE FROM chat_messages WHERE id = ?",
+                [message_id],
+            )
+
+            # Update the chat's updated_at timestamp
+            await self.execute_query(
+                conn,
+                """
+                UPDATE chat_history SET
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                [datetime.now(timezone.utc), chat_id],
+            )
+
+            return True
+
+    async def get_chat_message(
+        self,
+        message_id: str,
+    ) -> AnalystChatMessage | None:
+        """
+        Get a specific chat message by its ID.
+
+        Args:
+            message_id: ID of the message to retrieve
+
+        Returns:
+            The message if found, None otherwise
+        """
+        if not message_id:
+            logger.warning("No message_id provided for get_chat_message operation")
+            return None
+
+        logger.info(f"Getting chat message with ID {message_id}")
+
+        async with self._get_connection() as conn:
+            # Retrieve the message
+            result = await self.execute_query(
+                conn,
+                """
+                SELECT id, message, chat_id, created_at
+                FROM chat_messages
+                WHERE id = ?
+                """,
+                [message_id],
+            )
+
+            row = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: result.fetchone()
+            )
+
+            if not row:
+                logger.warning(f"Chat message with ID {message_id} not found")
+                return None
+
+            message = AnalystChatMessage.model_validate(json.loads(row[1]))
+            # Ensure the message has the correct id and chat_id
+            message.id = row[0]
+            message.chat_id = row[2]
+            return message
+
+    async def update_chat_message(
+        self,
+        message_id: str,
+        message: AnalystChatMessage,
+    ) -> bool:
+        """
+        Update an existing chat message.
+
+        Args:
+            message_id: The ID of the message to update
+            message: The updated message content
+
+        Returns:
+            True if update was successful, False otherwise
+        """
+        if not message_id:
+            logger.warning("No message_id provided for update_chat_message operation")
+            return False
+
+        logger.info(f"Updating chat message with ID {message_id}")
+
+        # Preserve the message ID in the updated message
+        message.id = message_id
+
+        async with self._get_connection() as conn:
+            # Check if the message exists
+            result = await self.execute_query(
+                conn, "SELECT chat_id FROM chat_messages WHERE id = ?", [message_id]
+            )
+            row = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: result.fetchone()
+            )
+
+            if not row:
+                logger.warning(f"Chat message with ID {message_id} does not exist")
+                return False
+
+            chat_id = row[0]
+            # Ensure chat_id is preserved
+            message.chat_id = chat_id
+
+            # Update the message
+            message_json = json.dumps(message.model_dump(), cls=ChatJSONEncoder)
+            await self.execute_query(
+                conn,
+                """
+                UPDATE chat_messages
+                SET message = ?,
+                    created_at = ?
+                WHERE id = ?
+                """,
+                [
+                    message_json,
+                    message.created_at,
+                    message_id,
+                ],
+            )
+
+            # Update the chat's updated_at timestamp
+            await self.execute_query(
+                conn,
+                """
+                UPDATE chat_history SET
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                [datetime.now(timezone.utc), chat_id],
+            )
+
+            return True
+
     async def update_chat(
         self,
         chat_id: str,
@@ -864,12 +1125,13 @@ class ChatHandler(BaseDuckDBHandler):
         data_source: str | None = None,
     ) -> None:
         """
-        Update a specific chat conversation by ID, selectively updating chat_name, messages, and/or data_source.
+        Update a specific chat conversation by ID, selectively updating chat_name and/or data_source.
+        If messages are provided, they will replace all existing messages for this chat.
 
         Args:
             chat_id: The ID of the chat to update (required)
             chat_name: Optional new name for the chat
-            messages: Optional new list of messages for the chat
+            messages: Optional new list of messages for the chat (will replace all existing messages)
             data_source: Optional new data source for the chat
         """
         if not chat_id:
@@ -897,7 +1159,7 @@ class ChatHandler(BaseDuckDBHandler):
                 logger.warning(f"Chat with ID {chat_id} does not exist")
                 return
 
-            # Build the update query based on what's provided
+            # Build the update query for chat_history
             current_time = datetime.now(timezone.utc)
             update_parts = ["updated_at = ?"]
             params: List[Any] = [current_time]
@@ -906,11 +1168,6 @@ class ChatHandler(BaseDuckDBHandler):
                 update_parts.append("chat_name = ?")
                 params.append(chat_name)
 
-            if messages is not None:
-                messages_json = json.dumps(messages, cls=ChatJSONEncoder)
-                update_parts.append("chat_messages = ?")
-                params.append(messages_json)
-
             if data_source is not None:
                 update_parts.append("data_source = ?")
                 params.append(data_source)
@@ -918,13 +1175,46 @@ class ChatHandler(BaseDuckDBHandler):
             # Add chat_id to params
             params.append(chat_id)
 
-            # Execute the update
+            # Execute the update for chat_history
             query = f"""
                 UPDATE chat_history SET
                     {", ".join(update_parts)}
                 WHERE id = ?
             """
             await self.execute_query(conn, query, params)
+
+            # If messages are provided, replace all existing messages
+            if messages is not None:
+                # First, delete all existing messages
+                await self.execute_query(
+                    conn,
+                    "DELETE FROM chat_messages WHERE chat_id = ?",
+                    [chat_id],
+                )
+
+                # Then insert new messages
+                for message in messages:
+                    # Ensure message has the chat_id and a unique ID if not already set
+                    if not message.id:
+                        message.id = str(uuid.uuid4())
+                    message.chat_id = chat_id
+
+                    message_json = json.dumps(message.model_dump(), cls=ChatJSONEncoder)
+                    await self.execute_query(
+                        conn,
+                        """
+                        INSERT INTO chat_messages
+                            (id, chat_id, message, created_at)
+                        VALUES
+                            (?, ?, ?, ?)
+                        """,
+                        [
+                            message.id,
+                            chat_id,
+                            message_json,
+                            message.created_at,
+                        ],
+                    )
 
     async def delete_chat(
         self, chat_name: str | None = None, chat_id: str | None = None
@@ -940,26 +1230,44 @@ class ChatHandler(BaseDuckDBHandler):
             logger.info(f"Deleting chat with ID {chat_id}")
 
             async with self._get_connection() as conn:
+                # First delete all associated messages
                 await self.execute_query(
-                    conn,
-                    """
-                    DELETE FROM chat_history
-                    WHERE id = ?
-                    """,
-                    [chat_id],
+                    conn, "DELETE FROM chat_messages WHERE chat_id = ?", [chat_id]
+                )
+
+                # Then delete the chat history record
+                await self.execute_query(
+                    conn, "DELETE FROM chat_history WHERE id = ?", [chat_id]
                 )
         elif chat_name:
             logger.info(f"Deleting chat {chat_name} for user {self.user_id}")
 
             async with self._get_connection() as conn:
-                await self.execute_query(
+                # First, get the chat ID
+                result = await self.execute_query(
                     conn,
                     """
-                    DELETE FROM chat_history
+                    SELECT id
+                    FROM chat_history
                     WHERE user_id = ? AND chat_name = ?
                     """,
                     [self.user_id, chat_name],
                 )
+                row = await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: result.fetchone()
+                )
+
+                if row:
+                    chat_id = row[0]
+                    # Delete all associated messages
+                    await self.execute_query(
+                        conn, "DELETE FROM chat_messages WHERE chat_id = ?", [chat_id]
+                    )
+
+                    # Then delete the chat history record
+                    await self.execute_query(
+                        conn, "DELETE FROM chat_history WHERE id = ?", [chat_id]
+                    )
         else:
             logger.warning(
                 "Neither chat_name nor chat_id provided for delete operation"
@@ -970,6 +1278,28 @@ class ChatHandler(BaseDuckDBHandler):
         logger.info(f"Deleting all chats for user {self.user_id}")
 
         async with self._get_connection() as conn:
+            # Get all chat IDs for this user
+            result = await self.execute_query(
+                conn, "SELECT id FROM chat_history WHERE user_id = ?", [self.user_id]
+            )
+            await asyncio.get_running_loop().run_in_executor(
+                None, lambda: result.fetchall()
+            )
+
+            # First delete all chat messages for this user's chats
+            chat_ids_result = await self.execute_query(
+                conn, "SELECT id FROM chat_history WHERE user_id = ?", [self.user_id]
+            )
+            chat_ids = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: chat_ids_result.fetchall()
+            )
+
+            for (chat_id,) in chat_ids:
+                await self.execute_query(
+                    conn, "DELETE FROM chat_messages WHERE chat_id = ?", [chat_id]
+                )
+
+            # Then delete the chat history records
             await self.execute_query(
                 conn, "DELETE FROM chat_history WHERE user_id = ?", [self.user_id]
             )
@@ -1150,53 +1480,78 @@ class AnalystDB:
             chat_name=chat_name, data_source=data_source
         )
 
-    async def update_chat(
-        self,
-        chat_id: str,
-        chat_message: AnalystChatMessage,
-        mode: Literal["append", "overwrite"] = "append",
-    ) -> None:
-        """
-        Update a chat by either appending a message or overwriting the last message.
-
-        Args:
-            chat_message: The message to append or use for overwriting
-            chat_name: Name of the chat to update (required if chat_id not provided)
-            chat_id: ID of the chat to update (takes precedence over chat_name)
-            mode: "append" to add a new message, "overwrite" to replace the last message
-
-        Returns:
-            The chat ID
-
-        Raises:
-            ValueError: If neither chat_name nor chat_id is provided, or if mode is invalid
-        """
-
-        # Get current chat content
-        current_chat_content = await self.get_chat_messages(chat_id=chat_id) or []
-
-        if mode == "append":
-            chat_messages = current_chat_content + [chat_message]
-            await self.chat_handler.update_chat(messages=chat_messages, chat_id=chat_id)
-        elif mode == "overwrite":
-            if current_chat_content:
-                current_chat_content[-1] = chat_message
-                await self.chat_handler.update_chat(
-                    messages=current_chat_content,
-                    chat_id=chat_id,
-                )
-            else:
-                # If chat is empty, just append the message
-                await self.chat_handler.update_chat(
-                    messages=[chat_message], chat_id=chat_id
-                )
-        else:
-            raise ValueError("Invalid mode. Use 'append' or 'overwrite'.")
-
     async def get_chat_names(
         self,
     ) -> list[str]:
         return await self.chat_handler.get_chat_names()
+
+    async def add_chat_message(
+        self,
+        chat_id: str,
+        message: AnalystChatMessage,
+    ) -> str:
+        """
+        Add a new message to a chat.
+
+        Args:
+            chat_id: The ID of the chat to update
+            message: The message to add
+
+        Returns:
+            The ID of the newly added message
+        """
+        return await self.chat_handler.add_chat_message(
+            chat_id=chat_id, message=message
+        )
+
+    async def update_chat_message(
+        self,
+        message_id: str,
+        message: AnalystChatMessage,
+    ) -> bool:
+        """
+        Update an existing chat message directly by ID.
+
+        Args:
+            message_id: ID of the message to update
+            message: New message content
+
+        Returns:
+            True if update was successful, False otherwise
+        """
+        return await self.chat_handler.update_chat_message(
+            message_id=message_id, message=message
+        )
+
+    async def delete_chat_message(
+        self,
+        message_id: str,
+    ) -> bool:
+        """
+        Delete a specific chat message by its ID.
+
+        Args:
+            message_id: ID of the message to delete
+
+        Returns:
+            True if deletion was successful, False otherwise
+        """
+        return await self.chat_handler.delete_chat_message(message_id=message_id)
+
+    async def get_chat_message(
+        self,
+        message_id: str,
+    ) -> AnalystChatMessage | None:
+        """
+        Get a specific chat message by its ID.
+
+        Args:
+            message_id: ID of the message to retrieve
+
+        Returns:
+            The message if found, None otherwise
+        """
+        return await self.chat_handler.get_chat_message(message_id=message_id)
 
     async def get_chat_list(self) -> list[dict[str, Any]]:
         """
