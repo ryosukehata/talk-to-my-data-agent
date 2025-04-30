@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.1.12] - 2025-04-30
+
+### Changed
+
+- Pinned streamlit to version 1.44.1 to improve stability
+
 ## [0.1.11] - 2025-04-29
 
 ### Fixed
