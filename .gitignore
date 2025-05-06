@@ -215,4 +215,4 @@ frontend_react/deploy/metadata.yaml
 frontend_react/deploy/app_infra.json
 !frontend_react/deploy/dist
 
-!frontend_react/react_src/src/lib/*
+!frontend_react/react_src/src/lib

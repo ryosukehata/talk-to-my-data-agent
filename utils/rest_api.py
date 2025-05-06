@@ -428,10 +428,8 @@ async def upload_files(
 
                 elif file_extension in [".xlsx", ".xls"]:
                     base_name = os.path.splitext(file.filename)[0]
-                    contents = await file.read()
-                    excel_file = io.BytesIO(contents)
                     excel_dataset = pl.read_excel(
-                        excel_file, sheet_id=None
+                        io.BytesIO(contents), sheet_id=None
                     )  # Get available sheet names
                     if isinstance(excel_dataset, dict):
                         for sheet_name, data in excel_dataset.items():
@@ -846,6 +844,7 @@ async def create_new_chat_message(
     # Create a new chat
     chat_id = await analyst_db.create_chat(
         chat_name="New Chat",
+        data_source=payload.data_source,
     )
 
     # Create the user message

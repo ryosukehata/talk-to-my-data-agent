@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import os
 import sys
 
@@ -22,6 +23,18 @@ from fastapi.staticfiles import StaticFiles
 sys.path.append(".")
 
 from utils.rest_api import app
+
+# Configure logging to filter out the health check logs
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+
+class EndpointFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Filter out "GET /" health check logs
+        return "GET / HTTP/1.1" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 
 script_name = os.environ.get("SCRIPT_NAME", "")
 react_build_dir = "dist"
@@ -51,4 +64,11 @@ async def serve_root() -> FileResponse:
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=False)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8080,
+        reload=False,
+        access_log=True,
+        log_level="warning",
+    )

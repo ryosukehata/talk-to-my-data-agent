@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from "react";
+import React, { Suspense, lazy, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@radix-ui/react-separator";
@@ -16,6 +16,9 @@ import { Loading } from "@/components/ui-custom/loading";
 import { RenameChatModal } from "@/components/RenameChatModal";
 import { DataSourceToggle } from "@/components/DataSourceToggle";
 import { IChatMessage } from "@/api-state/chat-messages/types";
+import { useGeneratedDictionaries } from "@/api-state/dictionaries/hooks";
+import { useMultipleDatasetMetadata } from "@/api-state/cleansed-datasets/hooks";
+import { DATA_SOURCES } from "@/constants/dataSources";
 
 // Lazy load ResponseMessage for better performance
 const ResponseMessage = lazy(() =>
@@ -86,6 +89,38 @@ export const Chats: React.FC = () => {
   const { data: chats } = useFetchAllChats();
   const { mutate: deleteChat } = useDeleteChat();
   const allowSend = !messages?.some((message) => message.in_progress);
+  const { data: dictionaries } = useGeneratedDictionaries();
+  const { data: multipleMetadata } = useMultipleDatasetMetadata(
+    dictionaries?.map((d) => d.name) || []
+  );
+
+  const { hasMixedSources, allowedDataSources } = useMemo(() => {
+    if (!multipleMetadata)
+      return { allowedDataSources: [], hasMixedSources: false };
+
+    const dataSourcesSet = new Set<string>();
+
+    multipleMetadata.forEach(({ metadata }) => {
+      const { data_source } = metadata;
+
+      if (
+        data_source === DATA_SOURCES.FILE ||
+        data_source === DATA_SOURCES.CATALOG
+      ) {
+        dataSourcesSet.add(DATA_SOURCES.FILE);
+      } else if (data_source === DATA_SOURCES.DATABASE) {
+        dataSourcesSet.add(DATA_SOURCES.DATABASE);
+      }
+    });
+
+    return {
+      // Users can only select data sources that are present in the metadata
+      allowedDataSources: Array.from(dataSourcesSet),
+      hasMixedSources:
+        dataSourcesSet.has(DATA_SOURCES.FILE) &&
+        dataSourcesSet.has(DATA_SOURCES.DATABASE),
+    };
+  }, [multipleMetadata]);
 
   // Find the active chat based on chatId param
   const activeChat = chats
@@ -125,7 +160,10 @@ export const Chats: React.FC = () => {
     if (!messages || messages.length === 0) {
       return (
         <Suspense fallback={<ComponentLoading />}>
-          <InitialPrompt chatId={activeChat?.id} />
+          <InitialPrompt
+            allowedDataSources={allowedDataSources}
+            chatId={activeChat?.id}
+          />
         </Suspense>
       );
     }
@@ -144,7 +182,11 @@ export const Chats: React.FC = () => {
           ))}
         </ScrollArea>
         <Suspense fallback={<ComponentLoading />}>
-          <UserPrompt chatId={activeChat?.id} allowSend={allowSend} />
+          <UserPrompt
+            allowedDataSources={allowedDataSources}
+            chatId={activeChat?.id}
+            allowSend={allowSend}
+          />
         </Suspense>
       </>
     );
@@ -164,7 +206,9 @@ export const Chats: React.FC = () => {
           />
         </h2>
         <div>
-          <DataSourceToggle />
+          {hasMixedSources && (
+            <DataSourceToggle multipleMetadata={multipleMetadata} />
+          )}
         </div>
         <Button variant="ghost" onClick={handleDeleteChat}>
           <FontAwesomeIcon icon={faTrash} />

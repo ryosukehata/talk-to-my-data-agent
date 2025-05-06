@@ -1,29 +1,52 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { PromptInput } from "@/components/ui-custom/prompt-input";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faPaperPlane } from "@fortawesome/free-solid-svg-icons/faPaperPlane";
 import chatMidnight from "@/assets/chat-midnight.svg";
-import { usePostMessage, useFetchAllChats } from "@/api-state/chat-messages/hooks";
+import {
+  usePostMessage,
+  useFetchAllChats,
+} from "@/api-state/chat-messages/hooks";
 import { useAppState } from "@/state/hooks";
+import { DATA_SOURCES } from "@/constants/dataSources";
 
-export const InitialPrompt = ({ chatId }: { chatId?: string }) => {
-  const { enableChartGeneration, enableBusinessInsights, dataSource: globalDataSource } = useAppState();
+export const InitialPrompt = ({
+  chatId,
+  allowedDataSources,
+}: {
+  allowedDataSources?: string[];
+  chatId?: string;
+}) => {
+  const {
+    enableChartGeneration,
+    enableBusinessInsights,
+    dataSource: globalDataSource,
+  } = useAppState();
   const { data: chats } = useFetchAllChats();
   const { mutate } = usePostMessage();
   const [message, setMessage] = useState("");
-  
+  const isDisabled = !allowedDataSources?.[0];
+
   // Find the active chat to get its data source setting
-  const activeChat = chatId ? chats?.find(chat => chat.id === chatId) : undefined;
-  const chatDataSource = activeChat?.data_source || globalDataSource;
+  const activeChat = chatId
+    ? chats?.find((chat) => chat.id === chatId)
+    : undefined;
+  const chatDataSource = useMemo(() => {
+    const dataSource = activeChat?.data_source || globalDataSource;
+    // User can only select from the allowed data sources
+    return allowedDataSources?.includes(dataSource)
+      ? dataSource
+      : allowedDataSources?.[0] || DATA_SOURCES.FILE;
+  }, [activeChat?.data_source, globalDataSource, allowedDataSources]);
 
   const sendMessage = () => {
     if (message.trim()) {
-      mutate({ 
-        message, 
-        chatId, 
-        enableChartGeneration, 
-        enableBusinessInsights, 
-        dataSource: chatDataSource 
+      mutate({
+        message,
+        chatId,
+        enableChartGeneration,
+        enableBusinessInsights,
+        dataSource: chatDataSource,
       });
       setMessage("");
     }
@@ -40,17 +63,19 @@ export const InitialPrompt = ({ chatId }: { chatId?: string }) => {
             </strong>
           </h4>
           <p className="text-center mb-10">
-            Ask specific questions about your datasets to get insights, generate visualizations, 
-            and discover patterns. Include column names and the kind of analysis 
-            you're looking for to get more accurate results.
+            Ask specific questions about your datasets to get insights, generate
+            visualizations, and discover patterns. Include column names and the
+            kind of analysis you're looking for to get more accurate results.
           </p>
           <PromptInput
             icon={FontAwesomeIcon}
             iconProps={{
-              icon: faPaperPlane,
+              icon: isDisabled ? null : faPaperPlane,
               behavior: "append",
               onClick: sendMessage,
             }}
+            disabled={isDisabled}
+            aria-disabled={isDisabled}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -58,7 +83,11 @@ export const InitialPrompt = ({ chatId }: { chatId?: string }) => {
               }
             }}
             value={message}
-            placeholder="Ask another question about your datasets."
+            placeholder={
+              isDisabled
+                ? "Please upload and process data using the sidebar before starting the chat"
+                : "Ask another question about your datasets."
+            }
           />
         </div>
       </div>

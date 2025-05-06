@@ -72,6 +72,33 @@ def clear_chat() -> None:
     st.session_state.current_chat_id = None
 
 
+async def delete_message_pair(user_message_id: str) -> None:
+    analyst_db = st.session_state.analyst_db
+    if not st.session_state.current_chat_id:
+        return
+
+    user_message_index = None
+    for i, message in enumerate(st.session_state.chat_messages):
+        if message.id == user_message_id:
+            user_message_index = i
+            break
+    if user_message_index is None:
+        return
+
+    await analyst_db.delete_chat_message(user_message_id)
+
+    if (
+        user_message_index + 1 < len(st.session_state.chat_messages)
+        and st.session_state.chat_messages[user_message_index + 1].role == "assistant"
+    ):
+        assistant_message = st.session_state.chat_messages[user_message_index + 1]
+        await analyst_db.delete_chat_message(assistant_message.id)
+
+    st.session_state.chat_messages = await analyst_db.get_chat_messages(
+        chat_id=st.session_state.current_chat_id
+    )
+
+
 @dataclass
 class RenderContainers:
     """Containers for UI elements"""
@@ -101,7 +128,7 @@ class UnifiedRenderer:
             raise ValueError("Containers not initialized")
         return self._containers
 
-    def render_message(
+    async def render_message(
         self,
         message: AnalystChatMessage,
         within_chat_context: bool = False,
@@ -116,16 +143,28 @@ class UnifiedRenderer:
                 message.role,
                 avatar="bot.jpg" if message.role == "assistant" else "you.jpg",
             ):
-                self._render_message_content(message)
+                await self._render_message_content(message)
         else:
-            self._render_message_content(message)
+            await self._render_message_content(message)
 
-    def _render_message_content(self, message: AnalystChatMessage) -> None:
+    async def _render_message_content(self, message: AnalystChatMessage) -> None:
         """Internal method to render message content and components"""
         # Render main content
         if message.role == "user":
-            # For user messages, just render the content
-            st.markdown(message.content)
+            message_col, delete_btn_col = st.columns(
+                [0.95, 0.05], vertical_alignment="center"
+            )
+            with message_col:
+                st.markdown(message.content)
+
+            with delete_btn_col:
+                if st.button(
+                    "🗑️", key=f"delete_msg_{message.id}", use_container_width=True
+                ):
+                    await delete_message_pair(
+                        user_message_id=message.id,
+                    )
+                    st.rerun()
         else:
             # For assistant messages, only render the main content if there's no EnhancedQuestionGeneration
             has_enhanced = any(
@@ -253,13 +292,6 @@ class UnifiedRenderer:
                 st.code(last_exception.code)
 
 
-# Usage for historical messages
-def render_conversation_history(messages: list[AnalystChatMessage]) -> None:
-    renderer = UnifiedRenderer(is_live=False)
-    for message in messages:
-        renderer.render_message(message)
-
-
 async def run_complete_analysis_st(
     chat_request: ChatRequest, error_context: dict[str, Any]
 ) -> None:
@@ -305,7 +337,7 @@ async def run_complete_analysis_st(
                     EnhancedQuestionGeneration(enhanced_user_message=enhanced_message)
                 ],
             )
-            renderer.render_message(assistant_message, within_chat_context=True)
+            await renderer.render_message(assistant_message, within_chat_context=True)
 
             with st.spinner("Generating insights..."):
                 async for message in run_analysis_iterator:
@@ -314,7 +346,9 @@ async def run_complete_analysis_st(
                         break
                     else:
                         assistant_message.components.append(message)
-                    renderer.render_message(assistant_message, within_chat_context=True)
+                    await renderer.render_message(
+                        assistant_message, within_chat_context=True
+                    )
 
             st.session_state.chat_messages.append(assistant_message)
         except Exception as e:
@@ -546,7 +580,7 @@ async def main() -> None:
                     followup=st.container(),
                 )
                 renderer.set_containers(containers)
-                renderer.render_message(message, within_chat_context=True)
+                await renderer.render_message(message, within_chat_context=True)
         # Handle new chat input
         if question := st.chat_input(
             "Ask a question about your data",

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.1.13] - 2025-05-06
+
+### Fixed
+
+- Improved Registry / File / Database toggle functionality (react)
+- React App now accepts local xlsx files (react)
+- Fixed missing @/lib/utils import (react)
+
+### Added
+
+- Ability to delete individual chat messages (streamlit)
+
+### Changed
+
+- Improved logging (react)
+
 ## [0.1.12] - 2025-04-30
 
 ### Changed
