@@ -1,0 +1,8 @@
+streamlit
+pandas
+plotly
+wordcloud
+scikit-learn
+python-i18n
+PyYAML
+fugashi 

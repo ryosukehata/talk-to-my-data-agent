@@ -22,12 +22,10 @@ def main():
     logger.info(f"MODE: {MODE}")  # not used eventually
 
     logger.info("Starting export trace data")
-    run_trace_update_workflow(
-        deployment_id=LLM_DEPLOYMENT_ID,
-    )
+    path_trace = run_trace_update_workflow()
     logger.info("Updated trace dataset.")
     logger.info("Starting update usage data")
-    run_usage_update_flow()
+    path_usage = run_usage_update_flow()
     logger.info("Updated usage dataset.")
 
     logger.info("Finished job")

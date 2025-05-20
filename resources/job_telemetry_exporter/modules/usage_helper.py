@@ -17,10 +17,13 @@ DATASET_ACCESS_LOG_ID = config.DATASET_ACCESS_LOG_ID
 
 
 # --- Usage Update Workflow ---
-def run_usage_update_flow():
+def run_usage_update_flow() -> str:
     """
     Fetches application usage data, processes it, and uploads it as a new
     version to the specified DataRobot dataset.
+
+    Returns:
+        str: Version ID of the new dataset version or None if the operation failed.
     """
     logger.info("Starting application usage update workflow...")
     processed_temp_file = None
@@ -71,20 +74,7 @@ def run_usage_update_flow():
         logger.exception(
             f"An error occurred during the application usage update workflow: {e}"
         )
-        # Re-raise the exception if needed, or handle appropriately
-        # raise
-    finally:
-        # 4. Cleanup temporary file
-        if processed_temp_filepath and os.path.exists(processed_temp_filepath):
-            logger.debug(
-                f"Deleting temporary processed usage file: {processed_temp_filepath}"
-            )
-            try:
-                os.remove(processed_temp_filepath)
-            except OSError as e:
-                logger.error(
-                    f"Error removing temporary file {processed_temp_filepath}: {e}"
-                )
+    return processed_temp_filepath
 
 
 # Example of how to run this flow (optional, can be called from job.py)

@@ -29,33 +29,12 @@ from modules.deployment_helper import (
     initiate_prediction_data_export,
     poll_export_status,
 )
+from modules.file_helper import safe_remove_file
 
 logger = logging.getLogger(__name__)
 
 # --- Constants ---
 DATASET_TRACE_ID = config.DATASET_TRACE_ID
-
-
-def safe_remove_file(filepath: str) -> bool:
-    """
-    Safely remove a file with proper error handling.
-
-    Args:
-        filepath: Path to the file to remove.
-
-    Returns:
-        True if file was removed successfully, False otherwise.
-    """
-    if not filepath or not os.path.exists(filepath):
-        return True
-
-    try:
-        os.remove(filepath)
-        logger.debug(f"Deleted temporary file: {filepath}")
-        return True
-    except OSError as e:
-        logger.error(f"Error removing temporary file {filepath}: {e}")
-        return False
 
 
 # --- Trace Update Workflow ---
@@ -215,10 +194,14 @@ def run_export_flow(
         return None
 
 
-def run_trace_update_workflow(deployment_id=config.LLM_DEPLOYMENT_ID) -> None:
+def run_trace_update_workflow(deployment_id=config.LLM_DEPLOYMENT_ID) -> str:
     """
     Run the complete workflow: export data and update trace dataset.
     This function orchestrates both the export and update workflows.
+    Args:
+        deployment_id: The ID of the deployment (defaults to config).
+    Returns:
+        The full path to the saved CSV file, or None if the operation failed.
     """
     temp_filepath = None
 
@@ -250,11 +233,9 @@ def run_trace_update_workflow(deployment_id=config.LLM_DEPLOYMENT_ID) -> None:
 
     except Exception as e:
         logger.exception(f"An error occurred in the main workflow: {e}")
-    finally:
-        # Clean up the initially downloaded new trace file
-        safe_remove_file(temp_filepath)
 
     logger.info("Overall workflow finished.")
+    return temp_filepath
 
 
 if __name__ == "__main__":

@@ -218,3 +218,5 @@ frontend_react/deploy/app_infra.json
 !frontend_react/deploy/dist
 
 !frontend_react/react_src/src/lib/*
+**/*.csv
+**/*.parquet

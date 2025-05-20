@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import Any
 
 import datarobot as dr
@@ -34,6 +35,7 @@ async def async_submit_actuals_to_datarobot(
 ) -> None:
     dr_client, deployment_chat_base_url = initialize_deployment()
     deployment_chat_actuals_url = deployment_chat_base_url + "actuals/fromJSON/"
+    telemetry_json["endTimestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     payload = {
         "data": [
             {

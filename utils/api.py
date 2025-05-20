@@ -25,13 +25,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from types import ModuleType, TracebackType
-from typing import (
-    Any,
-    AsyncGenerator,
-    Type,
-    TypeVar,
-    cast,
-)
+from typing import Any, AsyncGenerator, Type, TypeVar, cast
 
 import datarobot as dr
 import instructor
@@ -64,10 +58,7 @@ from utils.code_execution import (
     execute_python,
     reflect_code_generation_errors,
 )
-from utils.data_cleansing_helpers import (
-    add_summary_statistics,
-    process_column,
-)
+from utils.data_cleansing_helpers import add_summary_statistics, process_column
 from utils.database_helpers import get_external_database
 from utils.dr_helper import async_submit_actuals_to_datarobot, initialize_deployment
 from utils.logging_helper import get_logger, log_api_call
@@ -267,6 +258,9 @@ async def _get_dictionary_batch(
 
     # Get sample data and stats for just these columns
     # Convert timestamps to ISO format strings for JSON serialization
+    if telemetry_json is not None:
+        telemetry_send = deepcopy(telemetry_json)
+        telemetry_send["startTimestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         logger.debug(f"Processing batch of {len(columns)} columns")
         sample_data = {}
@@ -352,12 +346,12 @@ async def _get_dictionary_batch(
         association_id = completion_org.datarobot_moderations["association_id"]
         logger.info(f"Association ID: {association_id}")
 
-        if telemetry_json is not None:
+        if telemetry_send is not None:
             # query type added in parent function
             # submit telemetry
             asyncio.create_task(
                 async_submit_actuals_to_datarobot(
-                    association_id=association_id, telemetry_json=telemetry_json
+                    association_id=association_id, telemetry_json=telemetry_send
                 )
             )
 
@@ -488,6 +482,9 @@ async def suggest_questions(
             - questions: list of validated question objects
             - metadata: Dictionary of processing information
     """
+    if telemetry_json is not None:
+        telemetry_send = deepcopy(telemetry_json)
+        telemetry_send["startTimestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     # Validate input
     dictionary = sum(
         [
@@ -554,9 +551,8 @@ async def suggest_questions(
     association_id = completion_org.datarobot_moderations["association_id"]
     logger.info(f"Association ID: {association_id}")
 
-    if telemetry_json is not None:
+    if telemetry_send is not None:
         # add query type to telemetry
-        telemetry_send = deepcopy(telemetry_json)
         telemetry_send["query_type"] = "01_generate_suggested_questions"
         # submit telemetry
         asyncio.create_task(
@@ -639,6 +635,9 @@ async def _generate_run_charts_python_code(
     validation_error: InvalidGeneratedCode | None = None,
     telemetry_json: dict[str, Any] | None = None,
 ) -> str:
+    if telemetry_json is not None:
+        telemetry_send = deepcopy(telemetry_json)
+        telemetry_send["startTimestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     df = request.dataset.to_df().to_pandas()
     question = request.question
     dataframe_metadata = {
@@ -688,9 +687,8 @@ async def _generate_run_charts_python_code(
         )
     association_id = response_org.datarobot_moderations["association_id"]
     logger.info(f"Association ID: {association_id}")
-    if telemetry_json is not None:
+    if telemetry_send is not None:
         # add query type to telemetry
-        telemetry_send = deepcopy(telemetry_json)
         telemetry_send["query_type"] = "04_generate_run_charts_python_code"
         # submit telemetry
         asyncio.create_task(
@@ -720,6 +718,9 @@ async def _generate_run_analysis_python_code(
     """
     # Convert dictionary data structure to list of columns for all datasets
     logger.info("Starting code gen")
+    if telemetry_json is not None:
+        telemetry_send = deepcopy(telemetry_json)
+        telemetry_send["startTimestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     all_columns = []
     all_descriptions = []
@@ -836,9 +837,8 @@ async def _generate_run_analysis_python_code(
     association_id = completion_org.datarobot_moderations["association_id"]
     logger.info(f"Association ID: {association_id}")
 
-    if telemetry_json is not None:
+    if telemetry_send is not None:
         # add query type to telemetry
-        telemetry_send = deepcopy(telemetry_json)
         telemetry_send["query_type"] = "03_generate_code_file"
         # submit telemetry
         asyncio.create_task(
@@ -903,6 +903,9 @@ async def rephrase_message(
     Returns:
         Dict[str, str]: Dictionary containing response content
     """
+    if telemetry_json is not None:
+        telemetry_send = deepcopy(telemetry_json)
+        telemetry_send["startTimestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     # Convert messages to string format for prompt
     messages_str = "\n".join(
         [f"{msg['role']}: {msg['content']}" for msg in messages.messages]
@@ -930,9 +933,8 @@ async def rephrase_message(
     association_id = completion_org.datarobot_moderations["association_id"]
     logger.info(f"Association ID: {association_id}")
 
-    if telemetry_json is not None:
+    if telemetry_send is not None:
         # add query type to telemetry
-        telemetry_send = deepcopy(telemetry_json)
         telemetry_send["query_type"] = "02_rephrase"
         # submit telemetry
         asyncio.create_task(
@@ -1049,6 +1051,11 @@ async def get_business_analysis(
     try:
         # Convert JSON data to DataFrame for analysis
         start = datetime.now()
+        if telemetry_json is not None:
+            telemetry_send = deepcopy(telemetry_json)
+            telemetry_send["startTimestamp"] = datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
 
         df = request.dataset.to_df().to_pandas()
 
@@ -1085,10 +1092,10 @@ async def get_business_analysis(
         association_id = completion_org.datarobot_moderations["association_id"]
         logger.info(f"Association ID: {association_id}")
 
-        if telemetry_json is not None:
+        if telemetry_send is not None:
             # add query type to telemetry
-            telemetry_send = deepcopy(telemetry_json)
-            telemetry_send["query_type"] = "04_generate_business_analysis"
+            # although it's called the same time as 04, change number for clarity
+            telemetry_send["query_type"] = "05_generate_business_analysis"
             # submit telemetry
             asyncio.create_task(
                 async_submit_actuals_to_datarobot(
@@ -1259,6 +1266,9 @@ async def _generate_database_analysis_code(
     Returns:
     - Dictionary containing generated code and description
     """
+    if telemetry_json is not None:
+        telemetry_send = deepcopy(telemetry_json)
+        telemetry_send["startTimestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Convert dictionary data structure to list of columns for all tables
     dictionaries = [
@@ -1322,9 +1332,8 @@ async def _generate_database_analysis_code(
     association_id = completion_org.datarobot_moderations["association_id"]
     logger.info(f"Association ID: {association_id}")
 
-    if telemetry_json is not None:
+    if telemetry_send is not None:
         # add query type to telemetry
-        telemetry_send = deepcopy(telemetry_json)
         telemetry_send["query_type"] = "03_generate_code_database"
         # submit telemetry
         asyncio.create_task(
@@ -1503,15 +1512,15 @@ async def run_complete_analysis(
         log_memory()
 
         if is_database:
-            analysis_result: (
-                RunAnalysisResult | RunDatabaseAnalysisResult
-            ) = await run_database_analysis(
-                RunDatabaseAnalysisRequest(
-                    dataset_names=datasets_names,
-                    question=enhanced_message,
-                ),
-                analyst_db,
-                telemetry_json=telemetry_json,
+            analysis_result: RunAnalysisResult | RunDatabaseAnalysisResult = (
+                await run_database_analysis(
+                    RunDatabaseAnalysisRequest(
+                        dataset_names=datasets_names,
+                        question=enhanced_message,
+                    ),
+                    analyst_db,
+                    telemetry_json=telemetry_json,
+                )
             )
         else:
             analysis_result = await run_analysis(
