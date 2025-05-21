@@ -892,7 +892,7 @@ async def _run_charts(
     if not request.dataset:
         raise ValueError("Input data cannot be empty")
 
-    df = request.dataset.to_df().to_pandas()
+    df = request.dataset.to_df()
     if exception_history is None:
         exception_history = []
 
