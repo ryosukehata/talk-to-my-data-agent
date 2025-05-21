@@ -44,10 +44,10 @@ def suppress_datetime_warnings() -> Generator[None, None]:
 
 
 def try_simple_numeric_conversion(
-    series: pl.Series,
-    sample_series: pl.Series,
-    original_nulls: pl.Series,
-) -> tuple[bool, pl.Series, list[str]]:
+    series: pd.Series,
+    sample_series: pd.Series,
+    original_nulls: pd.Series,
+) -> tuple[bool, pd.Series, list[str]]:
     # 文字列の前後の空白を削除し、特殊文字（引用符や空白）を削除
     simple_cleaned = sample_series.astype(str).str.strip().str.replace(r"['\s]+", "", regex=True)
 

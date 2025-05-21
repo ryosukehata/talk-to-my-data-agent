@@ -299,7 +299,7 @@ async def _get_dictionary_batch(
                 sample_data[col] = sample_values.to_list()
             else:
                 # For non-datetime columns, just take the samples as is
-                sample_data[col] = df[col].head(num_samples).tolist('list')
+                sample_data[col] = df[col].head(num_samples).to_list()
 
         # Handle numeric summary
         numeric_summary = {}
@@ -1113,10 +1113,10 @@ async def _run_analysis(
             attempts=len(exception_history) + 1,
             datasets_analyzed=len(dataframes),
             total_rows_analyzed=sum(
-                len(df) for df in dataframes.values() if not df.is_empty()
+                len(df) for df in dataframes.values() if not df.empty
             ),
             total_columns_analyzed=sum(
-                len(df.columns) for df in dataframes.values() if not df.is_empty()
+                len(df.columns) for df in dataframes.values() if not df.empty
             ),
         ),
     )
@@ -1177,7 +1177,7 @@ async def _generate_database_analysis_code(
     all_samples = []
 
     for table in request.dataset_names:
-        df = (await analyst_db.get_dataset(table)).to_df().to_pandas()
+        df = (await analyst_db.get_dataset(table)).to_df()
 
         sample_str = f"Table: {table}\n{df.head(10).to_string()}"
         all_samples.append(sample_str)
