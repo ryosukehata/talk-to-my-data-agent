@@ -1,16 +1,14 @@
 import streamlit as st
 from wordcloud import WordCloud
 
-# Attempt to import fugashi and initialize Tagger
+# For Japanese tokenization, use janome
 try:
-    import fugashi
+    from janome.tokenizer import Tokenizer
 
-    tagger = fugashi.Tagger()
-    FUGASHI_AVAILABLE = True
+    tokenizer = Tokenizer()
+    JANOME_AVAILABLE = True
 except ImportError:
-    FUGASHI_AVAILABLE = False
-except RuntimeError:
-    FUGASHI_AVAILABLE = False
+    JANOME_AVAILABLE = False
 
 # For TF-IDF
 try:
@@ -27,15 +25,15 @@ def generate_user_wordcloud(text_data, font_path, current_language, _):
         return
     processed_text = text_data
     if current_language == "ja":
-        if FUGASHI_AVAILABLE:
+        if JANOME_AVAILABLE:
             try:
-                words = [word.surface for word in tagger(text_data)]
+                words = [token.surface for token in tokenizer.tokenize(text_data)]
                 processed_text = " ".join(words)
             except Exception as e:
-                st.error(_("errors.fugashi_tokenize_error", error=str(e)))
+                st.error(_("errors.janome_tokenize_error", error=str(e)))
                 return
         else:
-            st.error(_("errors.fugashi_init_error"))
+            st.error(_("errors.janome_init_error"))
             return
     # Count word frequencies
     from collections import Counter
@@ -57,17 +55,18 @@ def generate_error_wordcloud(text_list, font_path, current_language, _):
         st.warning(_("warnings.no_data_for_wordcloud"))
         return
     if current_language == "ja":
-        if FUGASHI_AVAILABLE:
+        if JANOME_AVAILABLE:
             try:
                 # Tokenize each error message
                 text_list = [
-                    " ".join([w.surface for w in tagger(t)]) for t in text_list
+                    " ".join([token.surface for token in tokenizer.tokenize(t)])
+                    for t in text_list
                 ]
             except Exception as e:
-                st.error(_("errors.fugashi_tokenize_error", error=str(e)))
+                st.error(_("errors.janome_tokenize_error", error=str(e)))
                 return
         else:
-            st.error(_("errors.fugashi_init_error"))
+            st.error(_("errors.janome_init_error"))
             return
     if not SKLEARN_AVAILABLE:
         st.error("scikit-learn is required for TF-IDF word cloud.")

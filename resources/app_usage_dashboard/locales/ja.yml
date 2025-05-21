@@ -28,8 +28,8 @@ ja:
     trace_raw_not_found: "dataディレクトリにtrace_raw.csvが見つかりません。"
     wordcloud_font_error: "ワードクラウド生成エラー。フォントパスが正しく、フォントが日本語をサポートしていることを確認してください: {font_path}。エラー: {e}"
     wordcloud_unexpected_error: "ワードクラウド生成中に予期せぬエラーが発生しました: {e}"
-    fugashi_tokenize_error: "fugashiによる日本語の形態素解析中にエラーが発生しました: {error}"
-    fugashi_init_error: "fugashiが利用できないか初期化に失敗しました。日本語の形態素解析はできません。"
+    janome_tokenize_error: "janomeによる日本語の形態素解析中にエラーが発生しました: {error}"
+    janome_init_error: "janomeが利用できないか初期化に失敗しました。日本語の形態素解析はできません。"
   kpi_labels:
     total_users: "総ユーザー数"
     recent_active_users: "最近のアクティブユーザー"

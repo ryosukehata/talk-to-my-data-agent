@@ -25,8 +25,8 @@ en:
     trace_raw_not_found: "trace_raw.csv not found in data directory."
     wordcloud_font_error: "Error generating word cloud. Ensure font path is correct and font supports Japanese: {font_path}. Error: {e}"
     wordcloud_unexpected_error: "An unexpected error occurred during word cloud generation: {e}"
-    fugashi_tokenize_error: "Error tokenizing Japanese text with fugashi: {error}"
-    fugashi_init_error: "Fugashi is not available or failed to initialize. Japanese tokenization is not possible."
+    janome_tokenize_error: "Error tokenizing Japanese text with janome: {error}"
+    janome_init_error: "Janome is not available or failed to initialize. Japanese tokenization is not possible."
   kpi_labels:
     total_users: "Total Users"
     recent_active_users: "Recent Active Users"

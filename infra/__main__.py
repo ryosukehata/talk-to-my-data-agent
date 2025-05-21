@@ -29,7 +29,12 @@ sys.path.append("..")
 
 from settings_main import PROJECT_ROOT
 
-from infra import settings_app_infra, settings_generative, settings_job_infra
+from infra import (
+    settings_app_infra,
+    settings_dashboard_infra,
+    settings_generative,
+    settings_job_infra,
+)
 from infra.components.dr_credential import (
     get_credential_runtime_parameter_values,
     get_database_credentials,
@@ -41,7 +46,7 @@ from utils.custom_job_helper import (
     delete_all_custom_job_schedule,
     get_custom_job_by_name,
 )
-from utils.resources import app_env_name, llm_deployment_env_name
+from utils.resources import app_env_name, dashboard_env_name, llm_deployment_env_name
 from utils.schema import AppInfra
 
 TEXTGEN_DEPLOYMENT_ID = os.environ.get("TEXTGEN_DEPLOYMENT_ID")
@@ -325,3 +330,39 @@ post_actions = CustomJobPostActions(
 pulumi.export("CUSTOM_JOB_RUN_ID", post_actions.custom_run_id)
 pulumi.export("CUSTOM_JOB_SCHEDULE_ID", post_actions.schedule_id)
 pulumi.export("MODE", "append")
+
+dashboard_runtime_parameters = [
+    datarobot.ApplicationSourceRuntimeParameterValueArgs(
+        key=key,
+        type="string",
+        value=value,
+    )
+    for key, value in {
+        "DATASET_TRACE_ID": dataset_trace.id,
+        "DATASET_ACCESS_LOG_ID": dataset_access_log.id,
+    }.items()
+]
+
+dashboard_files, dashboard_files_hash = settings_dashboard_infra.get_dashboard_files()
+dashboard_description = f"DataRobot Custom Application for Data Analyst Dashboard. Content Hash: {dashboard_files_hash}"
+
+dashboard_source = datarobot.ApplicationSource(
+    files=dashboard_files,
+    runtime_parameter_values=dashboard_runtime_parameters,
+    resources=datarobot.ApplicationSourceResourcesArgs(
+        resource_label=CustomAppResourceBundles.CPU_XL.value.id,
+    ),
+    **settings_dashboard_infra.dashboard_source_args,
+)
+
+dashboard = datarobot.CustomApplication(
+    resource_name=settings_dashboard_infra.dashboard_resource_name,
+    source_version_id=dashboard_source.version_id,
+    use_case_ids=[use_case.id],
+    allow_auto_stopping=True,
+)
+
+pulumi.export(dashboard_env_name, dashboard.id)
+pulumi.export(
+    settings_dashboard_infra.dashboard_resource_name, dashboard.application_url
+)

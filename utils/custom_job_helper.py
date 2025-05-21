@@ -28,6 +28,7 @@ def get_custom_job(custom_job_id: str) -> dict | None:
     """
     import datarobot as dr
     import httpx
+
     dr_client = dr.Client()
     url = f"{dr_client.endpoint}/customJobs/{custom_job_id}/"
     headers = dr_client.headers
@@ -51,6 +52,7 @@ def get_custom_job_by_name(job_name: str) -> dict | None:
     """
     import datarobot as dr
     import httpx
+
     dr_client = dr.Client()
     url = f"{dr_client.endpoint}/customJobs/"
     headers = dr_client.headers
@@ -145,7 +147,7 @@ def poll_custom_job_run_status(
     custom_job_id: str,
     custom_run_id: str,
     poll_interval: float = 5.0,
-    timeout: float = 600.0,
+    timeout: float = 1800.0,
 ) -> None:
     """
     Poll the running status of a DataRobot custom job. Raises exception if not succeeded.
