@@ -21,7 +21,6 @@ from types import FunctionType, ModuleType
 from typing import Any, Awaitable, Callable, ParamSpec, Type, TypeVar, cast
 
 import pandas as pd
-import polars as pl
 from pydantic import BaseModel
 
 from utils.logging_helper import get_logger
@@ -175,8 +174,8 @@ def execute_python(
     code: str,
     input_data: pd.DataFrame
     | dict[str, pd.DataFrame]
-    | pl.DataFrame
-    | dict[str, pl.DataFrame],
+    | pd.DataFrame
+    | dict[str, pd.DataFrame],
     output_type: Type[V],
     allowed_modules: set[str] | None = None,
 ) -> V:
@@ -204,7 +203,6 @@ def execute_python(
             "openpyxl",
             "pandas",
             "plotly",
-            "polars",
             "pyspark",
             "random",
             "re",

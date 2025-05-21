@@ -18,8 +18,7 @@ import warnings
 from contextlib import contextmanager
 from typing import Generator, cast
 
-import polars as pl
-
+import pandas as pd
 from utils.logging_helper import get_logger
 from utils.schema import CleansedColumnReport
 
@@ -49,15 +48,18 @@ def try_simple_numeric_conversion(
     sample_series: pl.Series,
     original_nulls: pl.Series,
 ) -> tuple[bool, pl.Series, list[str]]:
-    simple_cleaned = sample_series.str.strip_chars().str.replace_all(
-        r"['\s]+",
-        "",
-    )
-    numeric_simple = simple_cleaned.cast(pl.Float64, strict=False)
-    new_nulls = numeric_simple.is_null()
-    simple_success_rate = 1 - (new_nulls.sum() - original_nulls.sum()) / len(
-        sample_series
-    )
+    # 文字列の前後の空白を削除し、特殊文字（引用符や空白）を削除
+    simple_cleaned = sample_series.astype(str).str.strip().str.replace(r"['\s]+", "", regex=True)
+
+    # 数値に変換
+    numeric_simple = pd.to_numeric(simple_cleaned, errors='coerce')
+
+    # 新しいnull値の数をカウント
+    new_nulls = numeric_simple.isna()
+    original_nulls_count = original_nulls.sum()
+
+    # 成功率の計算
+    simple_success_rate = 1 - (new_nulls.sum() - original_nulls_count) / len(sample_series)
 
     warnings = []
 
@@ -65,11 +67,12 @@ def try_simple_numeric_conversion(
         warnings.append(
             f"Converted to numeric after removing spaces/quotes. Success rate: {simple_success_rate:.1%}"
         )
-        series = series.str.strip_chars().str.replace_all(r"['\s]+", "")
-        series = series.cast(pl.Float64)
-        return True, series, warnings
+        # 実際のシリーズにも同じ処理を適用
+        clean_series = series.astype(str).str.strip().str.replace(r"['\s]+", "", regex=True)
+        result_series = pd.to_numeric(clean_series, errors='coerce')
+        return True, result_series, warnings
     else:
-        # If simple cleaning failed but had some success, add warning
+        # 変換が部分的に成功した場合は警告
         if simple_success_rate > 0.2:
             warnings.append(
                 f"Simple numeric conversion partially successful ({simple_success_rate:.1%}) but below threshold"
@@ -78,8 +81,8 @@ def try_simple_numeric_conversion(
 
 
 def _convert_units(
-    series: pl.Series, patterns: dict[str, bool] | None = None
-) -> tuple[pl.Series, dict[str, bool]]:
+    series: pd.Series, patterns: dict[str, bool] | None = None
+) -> tuple[pd.Series, dict[str, bool]]:
     """
     Convert a series containing various unit formats to numeric values.
     Returns the converted series and pattern detection info.
@@ -89,79 +92,76 @@ def _convert_units(
         patterns: Optional pre-detected patterns. If None, patterns will be detected.
     """
     if patterns is None:
-        # Only detect patterns if not provided
+        # パターンを検出
         patterns = {
-            "has_currency": cast(float, series.str.contains(r"[$€£¥]").mean()) > 0.7,
-            "has_commas": cast(float, series.str.contains(r",").mean()) > 0.7,
-            "has_percent": cast(float, series.str.contains(r"%").mean()) > 0.7,
-            "has_magnitude": cast(float, series.str.contains(r"(?i)[KMB]$").mean())
-            > 0.7,
+            "has_currency": cast(float, series.astype(str).str.contains(r"[$€£¥]", regex=True).mean()) > 0.7,
+            "has_commas": cast(float, series.astype(str).str.contains(r",", regex=True).mean()) > 0.7,
+            "has_percent": cast(float, series.astype(str).str.contains(r"%", regex=True).mean()) > 0.7,
+            "has_magnitude": cast(float, series.astype(str).str.contains(r"(?i)[KMB]$", regex=True).mean()) > 0.7,
         }
 
-    # Create a working copy
-    result = series.clone()
+    # コピーを作成
+    result = series.copy()
 
-    # Apply transformations based on detected patterns
+    # 検出されたパターンに基づいて変換
     if patterns["has_currency"]:
-        result = result.str.replace_all(r"[$€£¥]", "")
+        result = result.astype(str).str.replace(r"[$€£¥]", "", regex=True)
 
     if patterns["has_commas"]:
-        result = result.str.replace_all(",", "")
+        result = result.astype(str).str.replace(",", "", regex=True)
 
     if patterns["has_magnitude"]:
-        k_mask = result.str.contains(r"(?i)K$")
-        m_mask = result.str.contains(r"(?i)M$")
-        b_mask = result.str.contains(r"(?i)B$")
+        k_mask = result.astype(str).str.contains(r"(?i)K$", regex=True)
+        m_mask = result.astype(str).str.contains(r"(?i)M$", regex=True)
+        b_mask = result.astype(str).str.contains(r"(?i)B$", regex=True)
 
-        result = result.str.replace(r"(?i)[KMB]$", "")
-        numeric_result = result.cast(pl.Float64, strict=False)
+        # K/M/B を削除
+        result = result.astype(str).str.replace(r"(?i)[KMB]$", "", regex=True)
+        numeric_result = pd.to_numeric(result, errors='coerce')
 
-        # Only apply magnitude multipliers to valid numbers
-        valid_mask = numeric_result.is_not_null()
-        temp_df = pl.DataFrame([numeric_result]).with_columns(
-            result=pl.when(valid_mask & k_mask)
-            .then(numeric_result * 1000)
-            .when(valid_mask & m_mask)
-            .then(numeric_result * 1000000)
-            .when(valid_mask & b_mask)
-            .then(numeric_result * 1000000000)
-            .otherwise(numeric_result)
-        )
-        result = temp_df.get_column("result")
+        # 有効な数値にのみ乗数を適用
+        valid_mask = ~numeric_result.isna()
+        
+        # 各乗数に基づいて調整
+        if valid_mask.any() and k_mask.any():
+            numeric_result.loc[valid_mask & k_mask] *= 1000
+        if valid_mask.any() and m_mask.any():
+            numeric_result.loc[valid_mask & m_mask] *= 1000000
+        if valid_mask.any() and b_mask.any():
+            numeric_result.loc[valid_mask & b_mask] *= 1000000000
+            
+        result = numeric_result
 
     if patterns["has_percent"]:
-        result = result.str.replace("%", "")
-        result = result.cast(pl.Float64, strict=False) / 100
+        result = result.astype(str).str.replace("%", "", regex=True)
+        result = pd.to_numeric(result, errors='coerce') / 100
     else:
-        result = result.cast(pl.Float64, strict=False)
+        result = pd.to_numeric(result, errors='coerce')
 
     return result, patterns
 
 
 def try_unit_conversion(
-    series: pl.Series,
-    sample_series: pl.Series,
-    original_nulls: pl.Series,
-) -> tuple[bool, pl.Series, list[str]]:
+    series: pd.Series,
+    sample_series: pd.Series,
+    original_nulls: pd.Series,
+) -> tuple[bool, pd.Series, list[str]]:
     """
     Try to convert a series with units to numeric values, first testing on a sample.
     Returns success status, converted series, and warnings.
     """
     warnings: list[str] = []
 
-    # Check if series potentially contains convertible numeric data
-    if (
-        not cast(
-            float, sample_series.cast(pl.String).str.contains(r"[$€£¥%KMB,\d.]").mean()
-        )
-        > 0.5
-    ):
+    # 数値データを含む可能性があるかチェック
+    if not cast(
+        float, sample_series.astype(str).str.contains(r"[$€£¥%KMB,\d.]", regex=True).mean()
+    ) > 0.5:
         return False, series, warnings
 
-    # Try conversion on sample first and detect patterns
+    # サンプルでまず変換を試みてパターンを検出
     sample_result, patterns = _convert_units(sample_series)
 
-    # Generate warning messages for detected patterns
+    # 検出されたパターンに基づいて警告メッセージを生成
     pattern_names = {
         "has_currency": "currency symbols",
         "has_commas": "thousand separators",
@@ -173,18 +173,16 @@ def try_unit_conversion(
     if detected:
         warnings.append(f"Detected patterns in data: {', '.join(detected)}")
 
-    # Calculate conversion success rate
-    new_nulls = sample_result.is_null()
-    conversion_success_rate = 1 - (new_nulls.sum() - original_nulls.sum()) / len(
-        sample_result
-    )
+    # 変換成功率の計算
+    new_nulls = sample_result.isna()
+    conversion_success_rate = 1 - (new_nulls.sum() - original_nulls.sum()) / len(sample_result)
 
     if conversion_success_rate > 0.8:
-        # If sample conversion was successful, convert full dataset using detected patterns
+        # サンプル変換が成功した場合、検出されたパターンを使用して完全なデータセットを変換
         warnings.append(
             f"Converted to numeric with pattern handling. Success rate: {conversion_success_rate:.1%}"
         )
-        result, _ = _convert_units(series, patterns)  # Reuse patterns from sample
+        result, _ = _convert_units(series, patterns)  # サンプルから得たパターンを再利用
         return True, result, warnings
 
     elif conversion_success_rate > 0.2:
@@ -196,29 +194,30 @@ def try_unit_conversion(
 
 
 def try_datetime_conversion(
-    series: pl.Series,
-    sample_series: pl.Series,
-    original_nulls: pl.Series,
-) -> tuple[bool, pl.Series, list[str]]:
-    # try to convert to date
-
+    series: pd.Series,
+    sample_series: pd.Series,
+    original_nulls: pd.Series,
+) -> tuple[bool, pd.Series, list[str]]:
+    # 日付への変換を試みる
     warnings = []
-    sample_series_pd = sample_series.to_pandas()
 
     with suppress_datetime_warnings():
         from pandas.core.tools.datetimes import (  # type: ignore[attr-defined]
             _guess_datetime_format_for_array,
         )
 
-        format_1 = _guess_datetime_format_for_array(sample_series_pd.values)
+        format_1 = _guess_datetime_format_for_array(sample_series.values)
         format_2 = _guess_datetime_format_for_array(
-            sample_series_pd.values, dayfirst=True
+            sample_series.values, dayfirst=True
         )
-    candidate_1 = sample_series.str.to_datetime(format=format_1)
-    candidate_2 = sample_series.str.to_datetime(format=format_2)
+        
+    # 2つの形式で日付時刻への変換を試す
+    with suppress_datetime_warnings():
+        candidate_1 = pd.to_datetime(sample_series, format=format_1, errors='coerce')
+        candidate_2 = pd.to_datetime(sample_series, format=format_2, errors='coerce', dayfirst=True)
 
-    candidate_1_success_rate = cast(float, candidate_1.is_not_null().mean())
-    candidate_2_success_rate = cast(float, candidate_2.is_not_null().mean())
+    candidate_1_success_rate = cast(float, (~candidate_1.isna()).mean())
+    candidate_2_success_rate = cast(float, (~candidate_2.isna()).mean())
 
     if candidate_1_success_rate > 0.8 or candidate_2_success_rate > 0.8:
         success_rate = max(
@@ -226,26 +225,29 @@ def try_datetime_conversion(
             candidate_2_success_rate,
         )
         warnings.append(f"Converted to datetime. Success rate: {success_rate:.1%}")
+        
         if candidate_1_success_rate > candidate_2_success_rate:
             warnings.append("Used month-first date parsing")
             with suppress_datetime_warnings():
-                ts_series = series.str.to_datetime(format=format_1, strict=False)
+                ts_series = pd.to_datetime(series, format=format_1, errors='coerce')
         else:
             warnings.append("Used day-first date parsing")
             with suppress_datetime_warnings():
-                ts_series = series.str.to_datetime(format=format_2, strict=False)
+                ts_series = pd.to_datetime(series, format=format_2, errors='coerce', dayfirst=True)
+        
         return True, ts_series, warnings
+    
     return False, series, warnings
 
 
 def add_summary_statistics(
-    df: pl.DataFrame, report: list[CleansedColumnReport]
+    df: pd.DataFrame, report: list[CleansedColumnReport]
 ) -> None:
     """Add summary statistics to the report."""
     for column_report in report:
         col = column_report.new_column_name
         if column_report.new_dtype:
-            null_count = df[col].is_null().sum()
+            null_count = df[col].isna().sum()
             total_count = len(df)
             if null_count > 0:
                 column_report.warnings.append(
@@ -253,7 +255,7 @@ def add_summary_statistics(
                 )
 
             if column_report.new_dtype == "float64":
-                unique_count = df[col].n_unique()
+                unique_count = df[col].nunique()
                 if unique_count == 1:
                     column_report.warnings.append("Contains only one unique value")
                 elif unique_count == 2:
@@ -263,13 +265,13 @@ def add_summary_statistics(
 
 
 def process_column(
-    df: pl.DataFrame,
+    df: pd.DataFrame,
     column_name: str,
-    sample_df: pl.DataFrame,
-) -> tuple[str, pl.Series, CleansedColumnReport]:
+    sample_df: pd.DataFrame,
+) -> tuple[str, pd.Series, CleansedColumnReport]:
     """Process a single column asynchronously."""
     cleaned_column_name = re.sub(r"\s+", " ", str(column_name).strip())
-    original_nulls = sample_df[column_name].is_null()
+    original_nulls = sample_df[column_name].isna()
     column_report = CleansedColumnReport(new_column_name=cleaned_column_name)
 
     if cleaned_column_name != column_name:
@@ -278,7 +280,7 @@ def process_column(
             f"Column renamed from '{column_name}' to '{cleaned_column_name}'"
         )
 
-    if df[column_name].dtype == pl.String:
+    if pd.api.types.is_string_dtype(df[column_name]):
         column_report.original_dtype = "string"
         conversions = [
             ("simple_clean", try_simple_numeric_conversion),
@@ -286,7 +288,7 @@ def process_column(
             ("datetime", try_datetime_conversion),
         ]
 
-        # Run conversion attempts in parallel using ThreadPoolExecutor
+        # それぞれの変換方法を試す
         for conversion_type, conversion_func in conversions:
             try:
                 logger.debug(

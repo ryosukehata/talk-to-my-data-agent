@@ -37,7 +37,6 @@ import instructor
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import polars as pl
 import psutil
 import scipy
 import sklearn
@@ -278,7 +277,7 @@ async def download_registry_datasets(
 
 
 async def _get_dictionary_batch(
-    columns: list[str], df: pl.DataFrame, batch_size: int = 5
+    columns: list[str], df: pd.DataFrame, batch_size: int = 5
 ) -> list[DataDictionaryColumn]:
     """Process a batch of columns to get their descriptions"""
 
@@ -290,44 +289,46 @@ async def _get_dictionary_batch(
         logger.debug("Converting datetime columns to ISO format")
         num_samples = 10
         for col in columns:
-            if df[col].dtype.is_temporal():
+            if pd.api.types.is_datetime64_any_dtype(df[col]):
                 # Convert timestamps to ISO format strings
-                sample_data[col] = (
-                    df.select(
-                        pl.col(col)
-                        .cast(pl.Datetime)
-                        .map_elements(
-                            lambda x: x.isoformat() if x is not None else None
-                        )
-                    )
-                    .head(num_samples)
-                    .to_dict()
+                sample_values = df[col].head(num_samples).copy()
+                # NaT値を処理する
+                sample_values = sample_values.apply(
+                    lambda x: x.isoformat() if pd.notna(x) else None
                 )
+                sample_data[col] = sample_values.to_list()
             else:
                 # For non-datetime columns, just take the samples as is
-                sample_data[col] = df.select(pl.col(col)).head(num_samples).to_dict()
+                sample_data[col] = df[col].head(num_samples).tolist('list')
 
         # Handle numeric summary
         numeric_summary = {}
         logger.debug("Calculating numeric summaries")
         for col in columns:
-            if df[col].dtype.is_numeric():
-                desc = df[col].describe()
-                numeric_summary[col] = desc.to_dict()
+            if pd.api.types.is_numeric_dtype(df[col]):
+                desc = df[col].describe().reset_index().rename(columns={"index":"statistic" ,col:"value"})
+                numeric_summary[col] = desc.to_dict("list")
 
         # Get categories for non-numeric columns
         categories = []
         logger.debug("Getting categories for non-numeric columns")
         for column in columns:
-            if not df[column].dtype.is_numeric():
+            if not pd.api.types.is_numeric_dtype(df[col]):
                 try:
-                    value_counts = (
-                        df[column].sample(n=1000, seed=42).value_counts().head(10)
-                    )
+                    # サンプルを取得してvalue_countsを計算
+                    if len(df) > 1000:
+                        sample = df[column].sample(n=1000, random_state=42)
+                    else:
+                        sample = df[column]
+                    
+                    value_counts = sample.value_counts().head(10).reset_index()
+                    
                     # Convert any timestamp values to strings
-                    if df[column].dtype.is_temporal():
-                        value_counts[column] = value_counts[column].cast(pl.String)
-                    categories.append({column: value_counts[column].to_list()})
+                    if pd.api.types.is_datetime64_any_dtype(df[column]):
+                        value_counts["index"] = value_counts["index"].map(
+                            lambda x: x.isoformat() if pd.notna(x) else None
+                        )
+                    categories.append({column: value_counts['index'].tolist()})
                 except Exception:
                     continue
 
@@ -394,13 +395,13 @@ async def get_dictionary(dataset: AnalystDataset) -> DataDictionary:
         logger.info(f"Processing dataset {dataset.name} init")
         # Convert JSON to DataFrame
         df_full = dataset.to_df()
-        df = df_full.sample(n=min(10000, len(df_full)), seed=42)
+        df = df_full.sample(n=min(10000, len(df_full)), random_state=42)
 
         # Add debug logging
         logger.info(f"Processing dataset {dataset.name} with shape {df.shape}")
 
         # Handle empty dataset
-        if df.is_empty():
+        if df.empty:
             logger.warning(f"Dataset {dataset.name} is empty")
             return DataDictionary(
                 name=dataset.name,
@@ -621,7 +622,7 @@ async def _generate_run_charts_python_code(
     request: RunChartsRequest,
     validation_error: InvalidGeneratedCode | None = None,
 ) -> str:
-    df = request.dataset.to_df().to_pandas()
+    df = request.dataset.to_df()
     question = request.question
     dataframe_metadata = {
         "shape": {"rows": int(df.shape[0]), "columns": int(df.shape[1])},
@@ -814,11 +815,11 @@ async def cleanse_dataframe(dataset: AnalystDataset) -> CleansedDataset:
         ValueError: If a dataset is empty
     """
 
-    if dataset.to_df().is_empty():
+    if dataset.to_df().empty:
         raise ValueError(f"Dataset {dataset.name} is empty")
 
     df = dataset.to_df()
-    sample_df = df.sample(min(100, len(df)))
+    sample_df = df.sample(n=min(100, len(df)), random_state=42)
 
     results = []
     for col in df.columns:
@@ -832,7 +833,7 @@ async def cleanse_dataframe(dataset: AnalystDataset) -> CleansedDataset:
         new_columns[new_name] = series
         reports.append(report)
 
-    cleaned_df = pl.DataFrame(new_columns)
+    cleaned_df = pd.DataFrame(new_columns)
     add_summary_statistics(cleaned_df, reports)
 
     return CleansedDataset(
@@ -904,7 +905,6 @@ async def _run_charts(
                 "pd": pd,
                 "np": np,
                 "go": go,
-                "pl": pl,
                 "scipy": scipy,
             },
             functions={
@@ -920,7 +920,6 @@ async def _run_charts(
                 "plotly",
                 "scipy",
                 "datetime",
-                "polars",
             },
         )
     except InvalidGeneratedCode:
@@ -980,7 +979,7 @@ async def get_business_analysis(
         # Convert JSON data to DataFrame for analysis
         start = datetime.now()
 
-        df = request.dataset.to_df().to_pandas()
+        df = request.dataset.to_df()
 
         # Get first 1000 rows as CSV with quoted values for context
         df_csv = df.head(750).to_csv(index=False, quoting=1)
@@ -1058,7 +1057,7 @@ async def _run_analysis(
         attempt=len(exception_history),
     )
     logger.info("Code generated, preparing execution")
-    dataframes: dict[str, pl.DataFrame] = {}
+    dataframes: dict[str, pd.DataFrame] = {}
 
     for dataset_name in request.dataset_names:
         try:
@@ -1081,7 +1080,6 @@ async def _run_analysis(
                 "pd": pd,
                 "np": np,
                 "sm": sm,
-                "pl": pl,
                 "scipy": scipy,
                 "sklearn": sklearn,
             },
@@ -1097,7 +1095,6 @@ async def _run_analysis(
                 "sklearn",
                 "statsmodels",
                 "datetime",
-                "polars",
                 *find_imports(tools),
             },
         )

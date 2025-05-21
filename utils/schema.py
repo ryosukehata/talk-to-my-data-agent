@@ -21,7 +21,6 @@ from typing import Any, Callable, Generator, Literal, Optional, Union
 
 import pandas as pd
 import plotly.graph_objects as go
-import polars as pl
 from openai.types.chat.chat_completion_assistant_message_param import (
     ChatCompletionAssistantMessageParam,
 )
@@ -60,13 +59,12 @@ class DataRegistryDataset(BaseModel):
 
 
 class DataFrameWrapper:
-    def __init__(self, df: pl.DataFrame) -> None:
+    def __init__(self, df: pd.DataFrame) -> None:
         self.df = df
 
     def to_dict(self) -> list[dict[str, Any]]:
-        records = self.df.to_dicts()
-        # records_str = [{str(k): v for k, v in record.items()} for record in records]
-        return records
+        # Convert pandas DataFrame to list of dictionaries
+        return self.df.to_dict("list")
 
     @classmethod
     def __get_validators__(
@@ -83,13 +81,10 @@ class DataFrameWrapper:
             for c in v.columns:
                 if "period" in str(v[c].dtype):
                     v[c] = v[c].astype(str)
-            df = pl.DataFrame._from_pandas(v)
-            return cls(df)
-        if isinstance(v, pl.DataFrame):
             return cls(v)
         elif isinstance(v, list):
             try:
-                df = pl.DataFrame(v)
+                df = pd.DataFrame(v)
                 return cls(df)
             except Exception as e:
                 raise ValueError(
@@ -116,7 +111,7 @@ class AnalystDataset(BaseModel):
     # The internal data field stores the DataFrame wrapped in DataFrameWrapper.
     # It is excluded from the output and from the OpenAPI schema.
     data: DataFrameWrapper = Field(
-        default_factory=lambda: DataFrameWrapper(pl.DataFrame()),
+        default_factory=lambda: DataFrameWrapper(pd.DataFrame()),
         exclude=True,
         description="Internal field storing the pandas DataFrame",
     )
@@ -143,7 +138,7 @@ class AnalystDataset(BaseModel):
         if "data" not in values and "data_records" in values:
             try:
                 records = values["data_records"]
-                df = pl.DataFrame(records)
+                df = pd.DataFrame(records)
                 # Wrap the DataFrame before storing it.
                 values["data"] = DataFrameWrapper(df)
             except Exception as e:
@@ -152,13 +147,13 @@ class AnalystDataset(BaseModel):
                 ) from e
         return values
 
-    def to_df(self) -> pl.DataFrame:
+    def to_df(self) -> pd.DataFrame:
         """Return the internal pandas DataFrame."""
         return self.data.df
 
     @property
     def columns(self) -> list[str]:
-        return self.data.df.columns
+        return self.data.df.columns.tolist()
 
 
 class CleansedColumnReport(BaseModel):
@@ -179,7 +174,7 @@ class CleansedDataset(BaseModel):
     def name(self) -> str:
         return self.dataset.name
 
-    def to_df(self) -> pl.DataFrame:
+    def to_df(self) -> pd.DataFrame:
         return self.dataset.to_df()
 
 
@@ -196,7 +191,7 @@ class DataDictionary(BaseModel):
     @classmethod
     def from_analyst_df(
         cls,
-        df: pl.DataFrame,
+        df: pd.DataFrame,
         name: str = "analysis_result",
         column_descriptions: str = "Analysis result column",
     ) -> "DataDictionary":
@@ -214,7 +209,7 @@ class DataDictionary(BaseModel):
 
     @classmethod
     def from_application_df(
-        cls, df: pl.DataFrame, name: str = "analysis_result"
+        cls, df: pd.DataFrame, name: str = "analysis_result"
     ) -> "DataDictionary":
         columns = {"column", "description", "data_type"}
         if not columns.issubset(df.columns):
@@ -226,13 +221,13 @@ class DataDictionary(BaseModel):
                 description=row["description"],
                 data_type=row["data_type"],
             )
-            for row in df.rows(named=True)
+            for row in df.to_dict("records")
         ]
 
         return DataDictionary(name=name, column_descriptions=column_descriptions)
 
-    def to_application_df(self) -> pl.DataFrame:
-        return pl.DataFrame(
+    def to_application_df(self) -> pd.DataFrame:
+        return pd.DataFrame(
             {
                 "column": [c.column for c in self.column_descriptions],
                 "description": [c.description for c in self.column_descriptions],

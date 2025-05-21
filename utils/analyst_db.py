@@ -23,7 +23,8 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, List, Optional, cast
 
 import duckdb
-import polars as pl
+import pandas as pd
+import pyarrow as pa
 
 from utils.logging_helper import get_logger
 from utils.schema import (
@@ -209,9 +210,10 @@ class DatasetHandler(BaseDuckDBHandler):
                 """,
             )
 
+
     async def register_dataframe(
         self,
-        df: pl.DataFrame,
+        df: pd.DataFrame,
         name: str,
         dataset_type: DatasetType,
         data_source: DataSourceType,
@@ -245,7 +247,7 @@ class DatasetHandler(BaseDuckDBHandler):
 
         async with self._get_connection() as conn:
             # Create the table
-            arrow_table = df.to_arrow()
+            arrow_table = pa.Table.from_pandas(df, preserve_index=False)
 
             def create_table() -> None:
                 conn.register("temp_view", arrow_table)
@@ -284,6 +286,7 @@ class DatasetHandler(BaseDuckDBHandler):
                     metadata.file_size,
                 ],
             )
+
 
     async def list_datasets(
         self,
@@ -452,16 +455,16 @@ class DatasetHandler(BaseDuckDBHandler):
         name: str,
         expected_type: DatasetType | None = None,
         max_rows: int | None = None,
-    ) -> pl.DataFrame:
+    ) -> pd.DataFrame:
         """
-        Retrieve a registered table as a Polars DataFrame.
+        Retrieve a registered table as a Pandas DataFrame.
 
         Args:
             name: Name of the dataset to retrieve
             expected_type: Optional type validation - will raise error if dataset is not of expected type
 
         Returns:
-            Polars DataFrame containing the dataset
+            Pandas DataFrame containing the dataset
 
         Raises:
             ValueError: If dataset doesn't exist or is of wrong type
@@ -491,7 +494,7 @@ class DatasetHandler(BaseDuckDBHandler):
                 arrow_table = await asyncio.get_running_loop().run_in_executor(
                     None, result.arrow
                 )
-                return cast(pl.DataFrame, pl.from_arrow(arrow_table))
+                return cast(pd.DataFrame, arrow_table.to_pandas())
             except duckdb.CatalogException as e:
                 raise ValueError(f"Error retrieving dataset '{name}': {str(e)}") from e
 

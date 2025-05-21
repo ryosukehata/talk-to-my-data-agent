@@ -18,7 +18,7 @@ import warnings
 from collections import defaultdict
 from typing import cast
 
-import polars as pl
+import pandas as pd
 import streamlit as st
 from streamlit.runtime.uploaded_file_manager import UploadedFile
 
@@ -54,6 +54,11 @@ logger = get_logger("DataAnalystFrontend")
 app_infra = load_app_infra()
 Database = get_external_database()
 
+@st.cache_data # キャッシュを使って、CSV変換を高速化
+def convert_df_to_csv(df):
+    # index=Falseとすることで、CSVにDataFrameのインデックスが出力されないようにする
+    # .encode('utf-8')でUTF-8エンコーディングを指定し、日本語などの文字化けを防ぐ
+    return df.to_csv(index=False).encode('utf-8')
 
 async def process_uploaded_file(file: UploadedFile) -> list[str]:
     """Process a single uploaded file and return a list of (dataset_name, dataframe) tuples
@@ -71,7 +76,7 @@ async def process_uploaded_file(file: UploadedFile) -> list[str]:
         if file_extension == ".csv":
             logger.info(f"Loading CSV: {file.name}")
             log_memory()
-            df = pl.read_csv(file, infer_schema_length=10000, low_memory=True)
+            df = pd.read_csv(file)
             log_memory()
             dataset_name = os.path.splitext(file.name)[0]
             results.append(AnalystDataset(name=dataset_name, data=df))
@@ -79,13 +84,15 @@ async def process_uploaded_file(file: UploadedFile) -> list[str]:
                 f"Loaded CSV {dataset_name}: {len(df)} rows, {len(df.columns)} columns"
             )
 
+
+
         elif file_extension in [".xlsx", ".xls"]:
             # Read all sheets
-
             base_name = os.path.splitext(file.name)[0]
-            excel_sheets = pl.read_excel(file, sheet_id=0)
-            for sheet_name, data in excel_sheets.items():
-                # Use sheet name as dataset name if multiple sheets, otherwise use file name
+            excel_file = pd.ExcelFile(file)
+            sheet_names = excel_file.sheet_names
+            for sheet_name in sheet_names:
+                data = pd.read_excel(file, sheet_name=sheet_name)
                 dataset_name = f"{base_name}_{sheet_name}"
                 results.append(AnalystDataset(name=dataset_name, data=data))
                 logger.info(
@@ -439,7 +446,7 @@ async def main() -> None:
                     # Download button
                     col1, col2, col3 = st.columns([1, 3, 1])
                     with col1:
-                        csv = df_display.write_csv()
+                        csv = convert_df_to_csv(df_display)
                         st.download_button(
                             label="Download Data",
                             data=csv,
@@ -470,7 +477,8 @@ async def main() -> None:
                     )
 
                     # Make dictionary editable
-                    edited_df = pl.DataFrame(
+                    # ここの編集方法は考える。
+                    edited_df = pd.DataFrame(
                         st.data_editor(
                             dict_df,
                             use_container_width=True,
@@ -496,7 +504,7 @@ async def main() -> None:
 
                     with col1:
                         # Download button for dictionary
-                        csv = edited_df.write_csv()
+                        csv = convert_df_to_csv(edited_df)
                         st.download_button(
                             label="Download Data Dictionary",
                             data=csv,
