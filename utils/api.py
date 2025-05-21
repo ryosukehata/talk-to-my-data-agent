@@ -530,7 +530,7 @@ async def suggest_questions(
             role="system", content=prompts.SYSTEM_PROMPT_SUGGEST_A_QUESTION
         ),
         ChatCompletionUserMessageParam(
-            role="user", content=f"Data Dictionary:\n{json.dumps(dict_data)}"
+            role="user", content=f"Data Dictionary:\n{json.dumps(dict_data, ensure_ascii=False)}"
         ),
     ]
     async with AsyncLLMClient() as client:
@@ -749,7 +749,7 @@ async def _generate_run_analysis_python_code(
         ),
         ChatCompletionUserMessageParam(
             role="user",
-            content=f"Data Dictionary:\n{json.dumps(dictionary_data)}",
+            content=f"Data Dictionary:\n{json.dumps(dictionary_data, ensure_ascii=False)}",
         ),
     ]
 
@@ -1193,7 +1193,7 @@ async def _generate_database_analysis_code(
             content=f"Sample Data:\n{chr(10).join(all_samples)}", role="user"
         ),
         ChatCompletionUserMessageParam(
-            content=f"Data Dictionary:\n{json.dumps(all_tables_info)}", role="user"
+            content=f"Data Dictionary:\n{json.dumps(all_tables_info, ensure_ascii=False)}", role="user"
         ),
     ]
     if validation_error:
