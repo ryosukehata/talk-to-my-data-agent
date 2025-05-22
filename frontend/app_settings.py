@@ -16,7 +16,6 @@
 import sys
 
 import streamlit as st
-from streamlit_theme import st_theme
 
 sys.path.append("..")
 from utils.schema import AppInfra
@@ -25,14 +24,10 @@ PAGE_ICON = "./datarobot_favicon.png"
 
 
 def display_page_logo() -> None:
-    theme = st_theme()
     # logo placeholder used for initial load
     logo = '<svg width="133" height="20" xmlns="http://www.w3.org/2000/svg" id="datarobot-logo"></svg>'
-    if theme:
-        if theme.get("base") == "light":
-            logo = "./DataRobot_black.svg"
-        else:
-            logo = "./DataRobot_white.svg"
+    logo = "./DataRobot_black.svg"
+    
     with st.container(key="datarobot-logo"):
         st.image(logo, width=200)
 
