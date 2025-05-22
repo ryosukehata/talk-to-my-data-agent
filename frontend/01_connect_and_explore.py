@@ -112,6 +112,7 @@ async def process_uploaded_file(file: UploadedFile) -> list[str]:
 
     except Exception as e:
         logger.error(f"Error loading {file.name}: {str(e)}", exc_info=True)
+        st.warning(f"このデータは読み込めませんでした。理由は以下の通りです。\n{str(e)}")
         return []
 
 
