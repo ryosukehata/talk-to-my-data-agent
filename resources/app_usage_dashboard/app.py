@@ -42,6 +42,11 @@ st.title(_("titles.admin_dashboard"))
 with st.spinner("Loading data..."):
     trace_chat_df, trace_raw_df = data_utils.get_or_generate_data(datetime.date.today())
 
+# if trace_raw_df is only 1 row, show a warning and stop the app
+if trace_raw_df.shape[0] == 1:
+    st.warning("No usage data found. Please run the data pipeline to generate data.")
+    st.stop()
+
 # Get all user emails
 user_emails = (
     sorted(trace_chat_df["user_email"].dropna().unique().tolist())
@@ -58,7 +63,7 @@ with st.sidebar:
     def file_status(path):
         if path.exists():
             stat = path.stat()
-            return f"✅ {path.name} | {stat.st_size//1024} KB | Updated: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stat.st_mtime))}"
+            return f"✅ {path.name} | {stat.st_size // 1024} KB | Updated: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stat.st_mtime))}"
         else:
             return f"❌ {path.name} | Not found"
 

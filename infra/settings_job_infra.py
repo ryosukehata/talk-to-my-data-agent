@@ -182,7 +182,13 @@ def run_job_once(custom_job_id: str) -> str:
     runtime_parameters = [
         {"fieldName": "MODE", "value": "overwrite", "type": "string"},
     ]
-    custom_run_id = run_custom_job(custom_job_id, runtime_parameters)
-    pulumi.log.info(f"[run_job_once] run_custom_job returned run_id: {custom_run_id}")
-    poll_custom_job_run_status(custom_job_id, custom_run_id)
-    return custom_run_id
+    try:
+        custom_run_id = run_custom_job(custom_job_id, runtime_parameters)
+        pulumi.log.info(
+            f"[run_job_once] run_custom_job returned run_id: {custom_run_id}"
+        )
+        poll_custom_job_run_status(custom_job_id, custom_run_id)
+        return {"success": True, "run_id": custom_run_id}
+    except Exception as e:
+        pulumi.log.warn(f"[run_job_once] Error running custom job: {e}")
+        return {"success": False, "error": str(e)}
