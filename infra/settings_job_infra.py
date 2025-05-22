@@ -190,5 +190,5 @@ def run_job_once(custom_job_id: str) -> str:
         poll_custom_job_run_status(custom_job_id, custom_run_id)
         return {"success": True, "run_id": custom_run_id}
     except Exception as e:
-        pulumi.log.warning(f"[run_job_once] Error running custom job: {e}")
+        pulumi.log.warn(f"[run_job_once] Error running custom job: {e}")
         return {"success": False, "error": str(e)}
