@@ -58,7 +58,6 @@ boto3>=1.36.2,<2.0
 
 # frontend
 streamlit==1.44.1
-st-theme>=1.2.3,<2.0
 streamlit-javascript>=0.1.5,<1.0
 
 # backend
