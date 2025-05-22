@@ -55,7 +55,7 @@ app_infra = load_app_infra()
 Database = get_external_database()
 
 
-@st.cache_data  # キャッシュを使って、CSV変換を高速化
+@st.cache_data # キャッシュを使って、CSV変換を高速化
 def convert_df_to_csv(df):
     # index=Falseとすることで、CSVにDataFrameのインデックスが出力されないようにする
     # .encode('utf-8')でUTF-8エンコーディングを指定し、日本語などの文字化けを防ぐ
