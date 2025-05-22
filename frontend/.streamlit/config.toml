@@ -1,6 +1,9 @@
 [server]
 maxUploadSize = 200
 maxMessageSize = 200
+enableWebsocketCompression = false
+websocket_ping_interval = 1
+disconnectedSessionTTL = 300
 [theme]
 base = "light"
 primaryColor = "#909BF5"
