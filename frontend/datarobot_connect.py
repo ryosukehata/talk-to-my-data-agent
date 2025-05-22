@@ -77,14 +77,23 @@ class DataRobotTokenManager:
         """Fetch data from DataRobot API using JavaScript."""
         js_command = self._JS_COMMAND_TEMPLATE.replace("URL", url)
         result = st_javascript(js_command)
-        time.sleep(1)
+
+        if "apiKeys" in url:
+            # wait 5 seconds to ensure the data is fetched
+            time.sleep(5)
+        else:
+            time.sleep(2)
         data = {}
         try:
             data = json.loads(result)
             data = cast(dict[str, Any], data)
             data["info_ok"] = True
+            logger.info(f"Fetched data from DataRobot Call: {url}")
         except Exception:
             data = {"info_ok": False, "reply": str(result)}
+            logger.error(
+                f"Failed to fetch data from DataRobot Call: {url}, result:{result}"
+            )
         return data
 
     def _set_user_credentials(self) -> None:
@@ -98,9 +107,11 @@ class DataRobotTokenManager:
                 endpoint=self._original_creds.endpoint,
             )
             return
-        if not os.environ.get("DR_CUSTOM_APP_EXTERNAL_URL"):
-            self._user_creds = self._original_creds
-            return
+        # avoid this in production
+        # if not os.environ.get("DR_CUSTOM_APP_EXTERNAL_URL"):
+        #     self._user_creds = self._original_creds
+        #     logger.warning("Using original credentials, assume running in local mode")
+        #     return
 
         # Fetch API keys
         apikeys_data = self._get_contents_from_url(self._API_URLS["apikeys"])
