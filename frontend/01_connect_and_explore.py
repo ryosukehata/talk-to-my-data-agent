@@ -59,7 +59,7 @@ Database = get_external_database()
 def convert_df_to_csv(df):
     # index=Falseとすることで、CSVにDataFrameのインデックスが出力されないようにする
     # .encode('utf-8')でUTF-8エンコーディングを指定し、日本語などの文字化けを防ぐ
-    return df.to_csv(index=False, encoding='utf-8-sig')
+    return df.to_csv(index=False).encode('utf_8_sig')
 
 
 async def process_uploaded_file(file: UploadedFile) -> list[str]:
