@@ -88,6 +88,8 @@ app_env_name: str = "DATAROBOT_APPLICATION_ID"
 
 llm_deployment_env_name: str = "LLM_DEPLOYMENT_ID"
 
+dashboard_env_name: str = "DATAROBOT_DASHBOARD_ID"
+
 
 class LLMDeployment(DynamicSettings):
     id: str = Field(

@@ -89,6 +89,8 @@ async def state_init() -> None:
         user_id = generate_user_id()
     else:
         user_id = st.session_state.datarobot_uid
+    if "user_email" not in st.session_state:
+        st.session_state.user_email = st.context.headers.get("x-user-email")
     if user_id:
         analyst_db = await AnalystDB.create(
             user_id=user_id,

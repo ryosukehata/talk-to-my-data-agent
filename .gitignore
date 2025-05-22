@@ -181,6 +181,8 @@ e2e/downloads/
 .env*
 !.env.template
 node_modules/
+uv.lock
+.python-version
 
 # Logs
 logs
@@ -216,3 +218,5 @@ frontend_react/deploy/app_infra.json
 !frontend_react/deploy/dist
 
 !frontend_react/react_src/src/lib
+**/*.csv
+**/*.parquet

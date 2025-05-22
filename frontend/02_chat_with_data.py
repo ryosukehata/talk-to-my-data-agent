@@ -317,6 +317,10 @@ async def run_complete_analysis_st(
                 for dataset_name in st.session_state.datasets_names
                 if st.session_state[f"dataset_{dataset_name}"]
             ]
+            telemetry_json = {
+                "user_email": st.session_state.user_email,
+                "user_msg": chat_request.messages[-1]["content"],
+            }
             run_analysis_iterator = run_complete_analysis(
                 chat_request=chat_request,
                 data_source=st.session_state.data_source,
@@ -326,6 +330,7 @@ async def run_complete_analysis_st(
                 message_id=st.session_state.chat_messages[-1].id,
                 enable_chart_generation=st.session_state.enable_chart_generation,
                 enable_business_insights=st.session_state.enable_business_insights,
+                telemetry_json=telemetry_json,
             )
             with st.spinner("Analysing question..."):
                 enhanced_message = await anext(run_analysis_iterator)
