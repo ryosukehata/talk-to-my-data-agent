@@ -306,10 +306,10 @@ class CustomJobPostActions(pulumi.ComponentResource):
             opts,
         )
         # Run the custom job once
-        self.custom_run_id = custom_job_id.apply(
-            lambda id: settings_job_infra.run_job_once(id)
+        result = custom_job_id.apply(lambda id: settings_job_infra.run_job_once(id))
+        self.custom_run_id = result.apply(
+            lambda r: r["run_id"] if r["success"] else "NA"
         )
-        # Create the schedule
         self.schedule_id = custom_job_id.apply(
             lambda id: settings_job_infra.create_job_schedule(id)
         )
