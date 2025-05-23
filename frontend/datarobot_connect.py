@@ -108,10 +108,10 @@ class DataRobotTokenManager:
             )
             return
         # avoid this in production
-        # if not os.environ.get("DR_CUSTOM_APP_EXTERNAL_URL"):
-        #     self._user_creds = self._original_creds
-        #     logger.warning("Using original credentials, assume running in local mode")
-        #     return
+        if not os.environ.get("DR_CUSTOM_APP_EXTERNAL_URL"):
+            self._user_creds = self._original_creds
+            logger.warning("Using original credentials, assume running in local mode")
+            return
 
         # Fetch API keys
         apikeys_data = self._get_contents_from_url(self._API_URLS["apikeys"])
