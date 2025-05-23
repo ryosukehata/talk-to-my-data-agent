@@ -427,7 +427,7 @@ async def upload_files(
                 elif file_extension in [".xlsx", ".xls"]:
                     base_name = os.path.splitext(file.filename)[0]
                     excel_dataset = pd.read_excel(
-                        io.BytesIO(contents), sheet_id=None
+                        io.BytesIO(contents), sheet_name=None
                     )  # Get available sheet names
                     if isinstance(excel_dataset, dict):
                         for sheet_name, data in excel_dataset.items():
@@ -613,13 +613,15 @@ async def get_cleansed_dataset(
         # Apply skip if needed (max_rows in get_cleansed_dataset only handles the limit)
         if skip > 0 and cleansed_dataset.dataset.to_df().shape[0] > skip:
             # Create a new dataset with skipped rows
-            skipped_df = cleansed_dataset.dataset.to_df().iloc[skip:limit]
+            skipped_df = cleansed_dataset.dataset.to_df().iloc[
+                skip : min(limit, max_rows)
+            ]
             cleansed_dataset.dataset = AnalystDataset(name=name, data=skipped_df)
         elif skip > 0:
             # If skip is greater than the number of rows, return an empty dataset
             cleansed_dataset.dataset = AnalystDataset(
                 name=name,
-                data=cleansed_dataset.dataset.to_df().iloc[0, 0],
+                data=cleansed_dataset.dataset.to_df().head(1),
             )
 
         return cleansed_dataset
