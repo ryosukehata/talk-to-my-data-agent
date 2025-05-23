@@ -64,7 +64,7 @@ class DataFrameWrapper:
 
     def to_dict(self) -> list[dict[str, Any]]:
         # Convert pandas DataFrame to list of dictionaries
-        return self.df.to_dict("list")
+        return self.df.to_dict("records")
 
     @classmethod
     def __get_validators__(
@@ -126,7 +126,7 @@ class AnalystDataset(BaseModel):
         return_type=list[dict[str, Any]],
     )
     def data_records(self) -> list[dict[str, Any]]:
-        return self.data.to_dict()
+        return self.data.to_dict("list")
 
     @model_validator(mode="before")
     @classmethod
