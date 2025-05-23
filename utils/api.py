@@ -1077,7 +1077,8 @@ async def get_business_analysis(
             telemetry_send["startTimestamp"] = datetime.now().strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
-
+        else:
+            telemetry_send = None
         df = request.dataset.to_df()
 
         # Get first 1000 rows as CSV with quoted values for context
