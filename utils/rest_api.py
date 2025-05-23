@@ -427,7 +427,7 @@ async def upload_files(
                 elif file_extension in [".xlsx", ".xls"]:
                     base_name = os.path.splitext(file.filename)[0]
                     excel_dataset = pd.read_excel(
-                        io.BytesIO(contents), sheet_id=None
+                        io.BytesIO(contents), sheet_name=None
                     )  # Get available sheet names
                     if isinstance(excel_dataset, dict):
                         for sheet_name, data in excel_dataset.items():
