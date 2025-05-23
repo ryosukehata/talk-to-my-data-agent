@@ -335,6 +335,8 @@ async def _get_dictionary_batch(
     if telemetry_json is not None:
         telemetry_send = deepcopy(telemetry_json)
         telemetry_send["startTimestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        telemetry_send = None
     try:
         logger.debug(f"Processing batch of {len(columns)} columns")
         sample_data = {}
@@ -566,6 +568,8 @@ async def suggest_questions(
     if telemetry_json is not None:
         telemetry_send = deepcopy(telemetry_json)
         telemetry_send["startTimestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        telemetry_send = None
     # Validate input
     dictionary = sum(
         [
@@ -720,6 +724,8 @@ async def _generate_run_charts_python_code(
     if telemetry_json is not None:
         telemetry_send = deepcopy(telemetry_json)
         telemetry_send["startTimestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        telemetry_send = None
     df = request.dataset.to_df()
     question = request.question
     dataframe_metadata = {
@@ -803,6 +809,8 @@ async def _generate_run_analysis_python_code(
     if telemetry_json is not None:
         telemetry_send = deepcopy(telemetry_json)
         telemetry_send["startTimestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        telemetry_send = None
 
     all_columns = []
     all_descriptions = []
@@ -988,6 +996,10 @@ async def rephrase_message(
     if telemetry_json is not None:
         telemetry_send = deepcopy(telemetry_json)
         telemetry_send["startTimestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        telemetry_send = None
+
+
     # Convert messages to string format for prompt
     messages_str = "\n".join(
         [f"{msg['role']}: {msg['content']}" for msg in messages.messages]
@@ -1347,6 +1359,8 @@ async def _generate_database_analysis_code(
     if telemetry_json is not None:
         telemetry_send = deepcopy(telemetry_json)
         telemetry_send["startTimestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        telemetry_send = None
 
     # Convert dictionary data structure to list of columns for all tables
     dictionaries = [
