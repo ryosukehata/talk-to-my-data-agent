@@ -617,7 +617,7 @@ async def get_cleansed_dataset(
             # If skip is greater than the number of rows, return an empty dataset
             cleansed_dataset.dataset = AnalystDataset(
                 name=name,
-                data=cleansed_dataset.dataset.to_df().iloc[0, 0],
+                data=cleansed_dataset.dataset.to_df().head(1),
             )
 
         return cleansed_dataset
