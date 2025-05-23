@@ -126,7 +126,7 @@ class AnalystDataset(BaseModel):
         return_type=list[dict[str, Any]],
     )
     def data_records(self) -> list[dict[str, Any]]:
-        return self.data.to_dict("list")
+        return self.data.to_dict()
 
     @model_validator(mode="before")
     @classmethod
