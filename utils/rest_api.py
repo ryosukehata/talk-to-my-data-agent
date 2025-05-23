@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Generator, List, Union, cast
 
 import datarobot as dr
-import polars as pl
+import pandas as pd
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -401,10 +401,8 @@ async def upload_files(
                 if file_extension == ".csv":
                     logger.info(f"Loading CSV: {file.filename}")
                     log_memory()
-                    df = pl.read_csv(
+                    df = pd.read_csv(
                         io.StringIO(contents.decode("utf-8")),
-                        infer_schema_length=10000,
-                        low_memory=True,
                     )
                     log_memory()
                     dataset_name = os.path.splitext(file.filename)[0]
@@ -428,7 +426,7 @@ async def upload_files(
 
                 elif file_extension in [".xlsx", ".xls"]:
                     base_name = os.path.splitext(file.filename)[0]
-                    excel_dataset = pl.read_excel(
+                    excel_dataset = pd.read_excel(
                         io.BytesIO(contents), sheet_id=None
                     )  # Get available sheet names
                     if isinstance(excel_dataset, dict):
@@ -448,7 +446,7 @@ async def upload_files(
                                 "dataset_name": dataset_name,
                             }
                             response.append(excel_sheet_response)
-                    elif isinstance(excel_dataset, pl.DataFrame):
+                    elif isinstance(excel_dataset, pd.DataFrame):
                         dataset_name = base_name
                         dataset = AnalystDataset(name=dataset_name, data=excel_dataset)
                         await analyst_db.register_dataset(
@@ -613,13 +611,13 @@ async def get_cleansed_dataset(
         # Apply skip if needed (max_rows in get_cleansed_dataset only handles the limit)
         if skip > 0 and cleansed_dataset.dataset.to_df().shape[0] > skip:
             # Create a new dataset with skipped rows
-            skipped_df = cleansed_dataset.dataset.to_df().slice(skip, limit)
+            skipped_df = cleansed_dataset.dataset.to_df().iloc[skip, limi]
             cleansed_dataset.dataset = AnalystDataset(name=name, data=skipped_df)
         elif skip > 0:
             # If skip is greater than the number of rows, return an empty dataset
             cleansed_dataset.dataset = AnalystDataset(
                 name=name,
-                data=cleansed_dataset.dataset.to_df().slice(0, 0),
+                data=cleansed_dataset.dataset.to_df().iloc[0, 0],
             )
 
         return cleansed_dataset
@@ -670,7 +668,7 @@ async def download_dictionary(
 
     # Convert to CSV
     csv_content = io.StringIO()
-    df.write_csv(csv_content)
+    df.to_csv(csv_content)
 
     # Create response with CSV attachment
     response = Response(content=csv_content.getvalue())
