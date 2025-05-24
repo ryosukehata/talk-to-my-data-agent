@@ -55,11 +55,11 @@ app_infra = load_app_infra()
 Database = get_external_database()
 
 
-@st.cache_data # キャッシュを使って、CSV変換を高速化
+@st.cache_data  # キャッシュを使って、CSV変換を高速化
 def convert_df_to_csv(df):
     # index=Falseとすることで、CSVにDataFrameのインデックスが出力されないようにする
     # .encode('utf-8')でUTF-8エンコーディングを指定し、日本語などの文字化けを防ぐ
-    return df.to_csv(index=False).encode('utf_8_sig')
+    return df.to_csv(index=False).encode("utf_8_sig")
 
 
 async def process_uploaded_file(file: UploadedFile) -> list[str]:
@@ -112,7 +112,9 @@ async def process_uploaded_file(file: UploadedFile) -> list[str]:
 
     except Exception as e:
         logger.error(f"Error loading {file.name}: {str(e)}", exc_info=True)
-        st.warning(f"このデータは読み込めませんでした。理由は以下の通りです。\n{str(e)}")
+        st.warning(
+            f"このデータは読み込めませんでした。理由は以下の通りです。\n{str(e)}"
+        )
         return []
 
 
@@ -125,7 +127,7 @@ def clear_data_callback() -> None:
 
 
 # Add callback for Data Registry dataset selection
-async def registry_download_callback() -> None:
+async def registry_download_callback(token: str) -> None:
     """Callback function for Data Registry dataset download"""
     if (
         "selected_registry_datasets" in st.session_state
@@ -140,7 +142,7 @@ async def registry_download_callback() -> None:
                 ]
                 with st.session_state.datarobot_connect.use_user_token():
                     dataframes = await download_registry_datasets(
-                        selected_ids, st.session_state.analyst_db
+                        selected_ids, st.session_state.analyst_db, token
                     )
                 dataset_names = [
                     dataset.name for dataset in dataframes if not dataset.error
@@ -224,8 +226,8 @@ async def uploaded_file_callback(uploaded_files: list[UploadedFile]) -> None:
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def st_list_registry_datasets() -> list[DataRegistryDataset]:
-    return list_registry_datasets()
+def st_list_registry_datasets(token: str) -> list[DataRegistryDataset]:
+    return list_registry_datasets(token)
 
 
 @st.cache_data(ttl="60s", show_spinner=False)
@@ -266,11 +268,29 @@ async def main() -> None:
             # Data Registry section
             st.subheader("☁️   DataRobot Data Registry")
 
+            # API Token input for Data Registry access
+            api_token = st.text_input(
+                "API Token",
+                type="password",
+                key="datarobot_api_token_for_registry",
+                help="Enter your DataRobot API token to access the Data Registry",
+                placeholder="Enter your API token here",
+            )
             # Get datasets from registry
 
             with st.spinner("Loading datasets from the Data Registry..."):
-                with st.session_state.datarobot_connect.use_user_token():
-                    datasets = [i.model_dump() for i in st_list_registry_datasets()]
+                if api_token:
+                    datasets = [
+                        i.model_dump()
+                        for i in st_list_registry_datasets(
+                            st.session_state.get("datarobot_api_token_for_registry")
+                        )
+                    ]
+                else:
+                    datasets = []
+                    st.warning(
+                        "Please provide your DataRobot API token to access the Data Registry"
+                    )
 
             # Create form for dataset selection
             with st.form("registry_selection_form", border=False):
@@ -294,7 +314,9 @@ async def main() -> None:
 
                 # Process form submission
                 if submit_button and len(selected_registry_datasets) > 0:
-                    await registry_download_callback()
+                    await registry_download_callback(
+                        st.session_state.get("datarobot_api_token_for_registry")
+                    )
                 elif submit_button:
                     st.warning("Please select at least one dataset")
 

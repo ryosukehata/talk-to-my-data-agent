@@ -361,7 +361,7 @@ async def get_registry_datasets(
     request: Request, limit: int = 100
 ) -> list[DataRegistryDataset]:
     with use_user_token(request):
-        return list_registry_datasets(limit)
+        return list_registry_datasets(request.state.session.datarobot_api_token, limit)
 
 
 @router.get("/database/tables")
@@ -482,7 +482,9 @@ async def upload_files(
         id_list: list[str] = json.loads(registry_ids)
         if id_list:
             with use_user_token(request):
-                dataframes = await download_registry_datasets(id_list, analyst_db)
+                dataframes = await download_registry_datasets(
+                    id_list, analyst_db, request.state.session.datarobot_api_token
+                )
                 dataset_names = [
                     dataset.name for dataset in dataframes if not dataset.error
                 ]
@@ -611,7 +613,9 @@ async def get_cleansed_dataset(
         # Apply skip if needed (max_rows in get_cleansed_dataset only handles the limit)
         if skip > 0 and cleansed_dataset.dataset.to_df().shape[0] > skip:
             # Create a new dataset with skipped rows
-            skipped_df = cleansed_dataset.dataset.to_df().iloc[skip:min(limit, max_rows)]
+            skipped_df = cleansed_dataset.dataset.to_df().iloc[
+                skip : min(limit, max_rows)
+            ]
             cleansed_dataset.dataset = AnalystDataset(name=name, data=skipped_df)
         elif skip > 0:
             # If skip is greater than the number of rows, return an empty dataset

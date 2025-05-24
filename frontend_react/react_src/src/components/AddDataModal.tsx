@@ -29,7 +29,9 @@ import { AxiosError } from "axios";
 import { TruncatedText } from "./ui-custom/truncated-text";
 
 export const AddDataModal = () => {
-  const { data } = useFetchAllDatasets();
+  // TODO: Remove the showDataRegistry flag when Data Registry should be enabled again.
+  const showDataRegistry = false;
+  const { data } = showDataRegistry ? useFetchAllDatasets() : { data: null };
   const [selectedDatasets, setSelectedDatasets] = useState<string[]>([]);
   const { data: dbTables } = useGetDatabaseTables();
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
@@ -97,32 +99,36 @@ export const AddDataModal = () => {
               </div>
             </div>
             <FileUploader onFilesChange={setFiles} progress={progress} />
-            <h4>Data Registry</h4>
-            <h6>Select one or more catalog items</h6>
-            <MultiSelect
-              options={
-                data
-                  ? data.map((i) => ({
-                      label: i.name,
-                      value: i.id,
-                      postfix: i.size,
-                    }))
-                  : []
-              }
-              onValueChange={setSelectedDatasets}
-              defaultValue={selectedDatasets}
-              placeholder="Select one or more items."
-              variant="inverted"
-              modalPopover
-              animation={2}
-              maxCount={3}
-            />
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>
-                  <TruncatedText maxLength={100}>{error}</TruncatedText>
-                </AlertDescription>
-              </Alert>
+            {showDataRegistry && (
+              <>
+                <h4>Data Registry</h4>
+                <h6>Select one or more catalog items</h6>
+                <MultiSelect
+                  options={
+                    data
+                      ? data.map((i) => ({
+                          label: i.name,
+                          value: i.id,
+                          postfix: i.size,
+                        }))
+                      : []
+                  }
+                  onValueChange={setSelectedDatasets}
+                  defaultValue={selectedDatasets}
+                  placeholder="Select one or more items."
+                  variant="inverted"
+                  modalPopover
+                  animation={2}
+                  maxCount={3}
+                />
+                {error && (
+                  <Alert variant="destructive">
+                    <AlertDescription>
+                      <TruncatedText maxLength={100}>{error}</TruncatedText>
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </>
             )}
           </>
         )}
